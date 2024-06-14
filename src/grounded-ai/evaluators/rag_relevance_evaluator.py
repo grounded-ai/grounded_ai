@@ -3,6 +3,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import pipeline
 import torch
 
+
 class RagEvaluator:
     """
     The RAG (Retrieval-Augmented Generation) Evaluator class is used to evaluate the relevance
@@ -24,7 +25,9 @@ class RagEvaluator:
     ```
     """
 
-    def __init__(self, base_model_id: str, groundedai_eval_id: str, quantization: bool = False):
+    def __init__(
+        self, base_model_id: str, groundedai_eval_id: str, quantization: bool = False
+    ):
         self.base_model_id = base_model_id
         self.groundedai_eval_id = groundedai_eval_id
         self.model = None
@@ -49,13 +52,19 @@ class RagEvaluator:
                 torch_dtype=compute_dtype,
                 quantization_config=bnb_config,
             )
-            model_peft = PeftModel.from_pretrained(base_model, groundedai_eval_id, config=config)
+            model_peft = PeftModel.from_pretrained(
+                base_model, groundedai_eval_id, config=config
+            )
             merged_model = model_peft.merge_and_unload()
         else:
             base_model = AutoModelForCausalLM.from_pretrained(
-                base_model_id, attn_implementation=attn_implementation, torch_dtype=compute_dtype
+                base_model_id,
+                attn_implementation=attn_implementation,
+                torch_dtype=compute_dtype,
             )
-            model_peft = PeftModel.from_pretrained(base_model, groundedai_eval_id, config=config)
+            model_peft = PeftModel.from_pretrained(
+                base_model, groundedai_eval_id, config=config
+            )
             merged_model = model_peft.merge_and_unload()
             merged_model.to("cuda")
 
@@ -86,9 +95,7 @@ class RagEvaluator:
         input_prompt = self.format_input(text, query)
         messages = [{"role": "user", "content": input_prompt}]
 
-        pipe = pipeline(
-            "text-generation", model=self.model, tokenizer=self.tokenizer
-        )
+        pipe = pipeline("text-generation", model=self.model, tokenizer=self.tokenizer)
 
         generation_args = {
             "max_new_tokens": 5,
