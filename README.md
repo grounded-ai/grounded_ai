@@ -1,4 +1,4 @@
-## GroundedAI grounded-eval Package
+## GroundedEval by GroundedAI
 
 ### Overview
 
@@ -8,10 +8,9 @@ The `grounded-eval` package is a powerful tool developed by GroundedAI to evalua
 
 - **Metric Evaluation**: Compute a wide range of metrics to assess the performance of LLM outputs, including:
   - Factual accuracy
-  - Coherence and fluency
   - Relevance to the given context
   - Potential biases or toxicity
-  - Adherence to specified guidelines or constraints
+  - Hallucination
 
 - **Small Language Model Integration**: Utilize state-of-the-art small language models, optimized for efficient evaluation tasks, to analyze LLM outputs accurately and quickly.
 
