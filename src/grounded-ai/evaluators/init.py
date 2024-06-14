@@ -1,3 +1,3 @@
-from .evaluator import HallucinationEvaluator
+from .evaluators import HallucinationEvaluator, RagEvaluator, ToxicityEvaluator
 
-__all__ = ['HallucinationEvaluator']
+__all__ = ['HallucinationEvaluator', 'RagEvaluator', 'ToxicityEvaluator']

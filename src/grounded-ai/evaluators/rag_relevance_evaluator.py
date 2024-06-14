@@ -3,7 +3,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import pipeline
 import torch
 
-class RAGEvaluator:
+class RagEvaluator:
     """
     The RAG (Retrieval-Augmented Generation) Evaluator class is used to evaluate the relevance
     of a given text with respect to a query.
@@ -12,7 +12,7 @@ class RAGEvaluator:
     ```python
     base_model_id = "microsoft/Phi-3-mini-4k-instruct"
     groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
-    evaluator = RAGEvaluator(base_model_id, groundedai_eval_id, quantization=True)
+    evaluator = RagEvaluator(base_model_id, groundedai_eval_id, quantization=True)
     evaluator.load_model(base_model_id, groundedai_eval_id)
     data = [
         ("What is the capital of France?", "Paris is the capital of France."),
