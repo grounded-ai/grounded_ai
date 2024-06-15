@@ -1,0 +1,5 @@
+peft>=0.11.1
+transformers>=4.0.0
+torch==2.3.0
+nvidia-cuda-nvrtc-cu12==12.1.105
+accelerate>=0.31.0

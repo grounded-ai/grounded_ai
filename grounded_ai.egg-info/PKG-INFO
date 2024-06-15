@@ -1,8 +1,35 @@
-## GroundedAI
+Metadata-Version: 2.1
+Name: grounded-ai
+Version: 0.0.3
+Summary: A Python package for evaluating LLM application outputs.
+Author-email: Josh Longenecker <jl@groundedai.tech>
+Project-URL: Homepage, https://github.com/grounded-ai
+Project-URL: Bug Tracker, https://github.com/grounded-ai/grounded-eval/issues
+Keywords: NLP,QA,Toxicity,Rag,evaluation,language-model,transformer
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: peft>=0.11.1
+Requires-Dist: transformers>=4.0.0
+Requires-Dist: torch==2.3.0
+Requires-Dist: nvidia-cuda-nvrtc-cu12==12.1.105
+Requires-Dist: accelerate>=0.31.0
+
+## GroundedEval by GroundedAI
 
 ### Overview
 
-The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate the performance of large language models (LLMs) and their applications. It leverages small language models and adapters to compute various metrics, providing insights into the quality and reliability of LLM outputs.
+The `grounded-eval` package is a powerful tool developed by GroundedAI to evaluate the performance of large language models (LLMs) and their applications. It leverages small language models and adapters to compute various metrics, providing insights into the quality and reliability of LLM outputs.
 
 ### Features
 
@@ -24,10 +51,10 @@ The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate
 
 ### Getting Started
 
-Install the `grounded-ai` package:
+Install the `grounded-eval` package:
 
 ```
-pip install grounded-ai
+pip install grounded-eval
 ```
 
 ### Example Usage: Toxicity Evaluation
@@ -35,13 +62,13 @@ pip install grounded-ai
 The `ToxicityEvaluator` class is used to evaluate the toxicity of a given text. Here's an example of how to use it:
 
 ```python
-from grounded_ai.evaluators.toxicity_evaluator import ToxicityEvaluator
+from grounded_eval.evaluators import ToxicityEvaluator
 
 base_model_id = "microsoft/Phi-3-mini-4k-instruct"
 groundedai_eval_id = "grounded-ai/phi3-toxicity-judge"
 
 # Initialize the ToxicityEvaluator
-evaluator = ToxicityEvaluator(base_model_id, groundedai_eval_id)
+evaluator = ToxicityEvaluator(base_model_id, groundedai_eval_id, quantization=True)
 
 # Load the base model and the GroundedAI adapter
 evaluator.load_model(base_model_id, groundedai_eval_id)
@@ -60,7 +87,7 @@ response = evaluator.evaluate(data)
 print(response)
 ```
 
-In this example, we initialize the `ToxicityEvaluator` with the base model ID (`microsoft/Phi-3-mini-4k-instruct`) and the GroundedAI adapter ID (`grounded-ai/phi3-toxicity-judge`). The `quantization` parameter is set to `True` to enable quantization for faster inference with less memory.
+In this example, we initialize the `ToxicityEvaluator` with the base model ID (`microsoft/Phi-3-mini-4k-instruct`) and the GroundedAI adapter ID (`grounded-ai/phi3-toxicity-judge`). The `quantization` parameter is set to `True` to enable quantization for faster inference.
 
 We then load the base model and the GroundedAI adapter using the `load_model` method.
 
@@ -80,4 +107,4 @@ We welcome contributions from the community! If you encounter any issues or have
 
 ### License
 
-The `grounded-ai` package is released under the [MIT License](https://opensource.org/licenses/MIT).
+The `grounded-eval` package is released under the [MIT License](https://opensource.org/licenses/MIT).

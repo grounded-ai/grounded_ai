@@ -3,20 +3,43 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "grounded-eval"
-version = "0.1.0"
-authors = [
-  { name="Josh Longenecker", email="jl@groundedai.com" },
-]
+name = "grounded-ai"
+version = "0.0.4"
 description = "A Python package for evaluating LLM application outputs."
 readme = "README.md"
 requires-python = ">=3.8"
+authors = [
+  { name = "Josh Longenecker", email = "jl@groundedai.tech" },
+]
+keywords = [
+  "NLP",
+  "QA",
+  "Toxicity",
+  "Rag",
+  "evaluation",
+  "language-model",
+  "transformer",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "peft>=0.1.0",
-    "transformers>=4.0.0",
-    "torch>=1.7.0",
-    "accelerate>=0.31.0",
-    "tyro>=0.8.4" 
+  "peft>=0.11.1",
+  "transformers>=4.0.0",
+  "torch==2.3.0",
+  "nvidia-cuda-nvrtc-cu12==12.1.105",
+  "accelerate>=0.31.0",
+  "flash_attn==2.5.9",
+  "bitsandbytes==0.43.1",
 ]
 
 [project.urls]

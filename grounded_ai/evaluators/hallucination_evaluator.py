@@ -86,7 +86,6 @@ class HallucinationEvaluator:
                 base_model_id,
                 attn_implementation=attn_implementation,
                 torch_dtype=compute_dtype,
-                quantization_config=bnb_config,
             )
             model_peft = PeftModel.from_pretrained(
                 base_model, groundedai_eval_id, config=config
