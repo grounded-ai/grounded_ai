@@ -1,20 +1,18 @@
-from peft import PeftModel, PeftConfig
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from transformers import pipeline
 import torch
+from dataclasses import dataclass
 
 
-class RagEvaluator:
+@dataclass
+class RagRelevanceEvaluator:
     """
     The RAG (Retrieval-Augmented Generation) Evaluator class is used to evaluate the relevance
     of a given text with respect to a query.
 
     Example Usage:
     ```python
-    base_model_id = "microsoft/Phi-3-mini-4k-instruct"
-    groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
-    evaluator = RagEvaluator(base_model_id, groundedai_eval_id, quantization=True)
-    evaluator.load_model(base_model_id, groundedai_eval_id)
+    evaluator = RagRelevanceEvaluator(groundedai_eval_id="grounded-ai/phi3-rag-relevance-judge", quantization=True)
+    evaluator.warmup()
     data = [
         ("What is the capital of France?", "Paris is the capital of France."),
         ("What is the largest planet in our solar system?", "Jupiter is the largest planet in our solar system.")
@@ -25,51 +23,8 @@ class RagEvaluator:
     ```
     """
 
-    def __init__(
-        self, base_model_id: str, groundedai_eval_id: str, quantization: bool = False
-    ):
-        self.base_model_id = base_model_id
-        self.groundedai_eval_id = groundedai_eval_id
-        self.model = None
-        self.tokenizer = None
-        self.quantization = quantization
-
-    def load_model(self, base_model_id: str, groundedai_eval_id: str):
-        if torch.cuda.is_bf16_supported():
-            compute_dtype = torch.bfloat16
-            attn_implementation = "flash_attention_2"
-        else:
-            compute_dtype = torch.float16
-            attn_implementation = "sdpa"
-
-        config = PeftConfig.from_pretrained(groundedai_eval_id)
-        tokenizer = AutoTokenizer.from_pretrained(base_model_id)
-        if self.quantization:
-            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-            base_model = AutoModelForCausalLM.from_pretrained(
-                base_model_id,
-                attn_implementation=attn_implementation,
-                torch_dtype=compute_dtype,
-                quantization_config=bnb_config,
-            )
-            model_peft = PeftModel.from_pretrained(
-                base_model, groundedai_eval_id, config=config
-            )
-            merged_model = model_peft.merge_and_unload()
-        else:
-            base_model = AutoModelForCausalLM.from_pretrained(
-                base_model_id,
-                attn_implementation=attn_implementation,
-                torch_dtype=compute_dtype,
-            )
-            model_peft = PeftModel.from_pretrained(
-                base_model, groundedai_eval_id, config=config
-            )
-            merged_model = model_peft.merge_and_unload()
-            merged_model.to("cuda")
-
-        self.model = merged_model
-        self.tokenizer = tokenizer
+    groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
+    quantization: bool = False
 
     def format_input(self, text, query):
         input_prompt = f"""
