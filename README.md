@@ -1,3 +1,5 @@
+Sure, here's the updated README with the PyPI link displayed in a nice manner:
+
 ## GroundedAI
 
 ### Overview
@@ -24,10 +26,10 @@ The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate
 
 ### Getting Started
 
-Install the `grounded-ai` package:
+Install the `grounded-ai` package from [PyPI](https://pypi.org/project/grounded-ai/):
 
 ```
-pip install grounded-ai
+pip install grounded-ai==0.0.9-alpha
 ```
 
 ### Example Usage: Toxicity Evaluation
