@@ -4,7 +4,8 @@ Sure, here's the updated README with the PyPI link displayed in a nice manner:
 
 ### Overview
 
-The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate the performance of large language models (LLMs) and their applications. It leverages small language models and adapters to compute various metrics, providing insights into the quality and reliability of LLM outputs.
+The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate the performance of large language models (LLMs) and their applications. It leverages our own fine tuned small language models and metric specific adapters to compute various metrics, providing insights into the quality and reliability of LLM outputs.
+Our models can be found here: https://huggingface.co/grounded-ai
 
 ### Features
 
