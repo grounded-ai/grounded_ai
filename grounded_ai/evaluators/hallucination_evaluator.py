@@ -1,7 +1,9 @@
 from transformers import pipeline
 import torch
+from dataclasses import dataclass
 
 
+@dataclass
 class HallucinationEvaluator:
     """
     HallucinationEvaluator is a class that evaluates whether a machine learning model has hallucinated or not.
@@ -42,6 +44,8 @@ class HallucinationEvaluator:
     # {'hallucinated': 1, 'truthful': 2, 'percentage_hallucinated': 33.33333333333333}
     ```
     """
+    groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
+    quantization: bool = False
 
     def format_func(self, query: str, response: str, reference: str = None) -> str:
         knowledge_line = f"[Knowledge]: {reference}\n" if reference is not None else ""
