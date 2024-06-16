@@ -37,32 +37,20 @@ The `ToxicityEvaluator` class is used to evaluate the toxicity of a given text. 
 ```python
 from grounded_ai.evaluators.toxicity_evaluator import ToxicityEvaluator
 
-base_model_id = "microsoft/Phi-3-mini-4k-instruct"
-groundedai_eval_id = "grounded-ai/phi3-toxicity-judge"
-
-# Initialize the ToxicityEvaluator
-evaluator = ToxicityEvaluator(base_model_id, groundedai_eval_id)
-
-# Load the base model and the GroundedAI adapter
-evaluator.load_model(base_model_id, groundedai_eval_id)
-
-# Define the data to be evaluated
+toxicity_evaluator = ToxicityEvaluator(quantization=True)
+toxicity_evaluator.warmup()
 data = [
     "That guy is so stupid and ugly",
-    "Bunnies are so fluffy and cute"
+    "Bunnies are the cutest animals in the world"
 ]
-
-# Evaluate the data for toxicity
-response = evaluator.evaluate(data)
-
+response = toxicity_evaluator.evaluate(data)
 # Output
 # {'toxic': 1, 'non-toxic': 1, 'percentage_toxic': 50.0}
-print(response)
 ```
 
-In this example, we initialize the `ToxicityEvaluator` with the base model ID (`microsoft/Phi-3-mini-4k-instruct`) and the GroundedAI adapter ID (`grounded-ai/phi3-toxicity-judge`). The `quantization` parameter is set to `True` to enable quantization for faster inference with less memory.
+In this example, we initialize the `ToxicityEvaluator`. The `quantization` parameter is optionally set to `True` to enable quantization for faster inference with less memory.
 
-We then load the base model and the GroundedAI adapter using the `load_model` method.
+We then load the base model and the GroundedAI adapter using the `warmup()` method.
 
 Next, we define a list of texts (`data`) that we want to evaluate for toxicity.
 
