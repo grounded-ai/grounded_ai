@@ -51,7 +51,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
         input_prompt = self.format_input(text, query)
         messages = [{"role": "user", "content": input_prompt}]
 
-        pipe = pipeline("text-generation", model=self.model, tokenizer=self.tokenizer)
+        pipe = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
 
         generation_args = {
             "max_new_tokens": 5,

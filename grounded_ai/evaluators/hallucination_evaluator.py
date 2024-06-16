@@ -47,7 +47,7 @@ class HallucinationEvaluator(BaseEvaluator):
     groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
     quantization: bool = False
 
-    def format_func(self, query: str, response: str, reference: str = None) -> str:
+    def format_input(self, query: str, response: str, reference: str = None) -> str:
         knowledge_line = f"[Knowledge]: {reference}\n" if reference is not None else ""
         prompt = f"""Your job is to evaluate whether a machine learning model has hallucinated or not.
     A hallucination occurs when the response is coherent but factually incorrect or nonsensical
@@ -67,7 +67,7 @@ class HallucinationEvaluator(BaseEvaluator):
 
         pipe = pipeline(
             "text-generation",
-            model=self.model,
+            model=self.merged_model,
             tokenizer=self.tokenizer,
         )
 
