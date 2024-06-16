@@ -62,7 +62,7 @@ class HallucinationEvaluator(BaseEvaluator):
         return prompt
 
     def run_model(self, query: str, response: str, reference: str = None) -> str:
-        input = self.format_func(query, response, reference)
+        input = self.format_input(query, response, reference)
         messages = [{"role": "user", "content": input}]
 
         pipe = pipeline(
