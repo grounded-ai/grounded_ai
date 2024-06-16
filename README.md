@@ -21,10 +21,6 @@ Our models can be found here: https://huggingface.co/grounded-ai
 
 - **Flexible Input/Output Handling**: Accept LLM outputs in various formats (text, JSON, etc.) and provide evaluation results in a structured and easily consumable manner.
 
-- **Customizable Evaluation Pipelines**: Define and configure evaluation pipelines to combine multiple metrics, weights, and thresholds based on your specific requirements.
-
-- **Reporting and Visualization**: Generate comprehensive reports and visualizations to communicate evaluation results effectively, facilitating decision-making and model improvement processes.
-
 ### Getting Started
 
 Install the `grounded-ai` package from [PyPI](https://pypi.org/project/grounded-ai/):
