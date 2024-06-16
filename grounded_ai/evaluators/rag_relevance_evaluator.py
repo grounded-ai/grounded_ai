@@ -1,17 +1,18 @@
 from transformers import pipeline
 import torch
 from dataclasses import dataclass
+from .base import BaseEvaluator
 
 
 @dataclass
-class RagRelevanceEvaluator:
+class RagRelevanceEvaluator(BaseEvaluator):
     """
     The RAG (Retrieval-Augmented Generation) Evaluator class is used to evaluate the relevance
     of a given text with respect to a query.
 
     Example Usage:
     ```python
-    evaluator = RagRelevanceEvaluator(groundedai_eval_id="grounded-ai/phi3-rag-relevance-judge", quantization=True)
+    evaluator = RagRelevanceEvaluator()
     evaluator.warmup()
     data = [
         ("What is the capital of France?", "Paris is the capital of France."),

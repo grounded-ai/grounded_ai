@@ -1,10 +1,10 @@
 from transformers import pipeline
 import torch
 from dataclasses import dataclass
-
+from .base import BaseEvaluator
 
 @dataclass
-class HallucinationEvaluator:
+class HallucinationEvaluator(BaseEvaluator):
     """
     HallucinationEvaluator is a class that evaluates whether a machine learning model has hallucinated or not.
 
