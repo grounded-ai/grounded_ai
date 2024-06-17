@@ -1,5 +1,3 @@
-Sure, here's the updated README with the PyPI link displayed in a nice manner:
-
 ## GroundedAI
 
 ### Overview
