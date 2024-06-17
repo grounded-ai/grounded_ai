@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from jinja2 import Template
-from prompt_hub import RAG_RELEVANCE_EVAL_BASE_PROMPT
+from .prompt_hub import RAG_RELEVANCE_EVAL_BASE_PROMPT
 from transformers import pipeline
 
 from .base import BaseEvaluator
