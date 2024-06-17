@@ -1,6 +1,10 @@
-from transformers import pipeline
-import torch
 from dataclasses import dataclass
+
+import torch
+from jinja2 import Template
+from prompt_hub import RAG_RELEVANCE_EVAL_BASE_PROMPT
+from transformers import pipeline
+
 from .base import BaseEvaluator
 
 
@@ -26,32 +30,20 @@ class RagRelevanceEvaluator(BaseEvaluator):
 
     groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
     quantization: bool = False
+    base_prompt = RAG_RELEVANCE_EVAL_BASE_PROMPT
 
     def format_input(self, text, query):
-        input_prompt = f"""
-        You are comparing a reference text to a question and trying to determine if the reference text
-        contains information relevant to answering the question. Here is the data:
-        [BEGIN DATA]
-        ************
-        [Question]: {query}
-        ************
-        [Reference text]: {text}
-        ************
-        [END DATA]
-        Compare the Question above to the Reference text. You must determine whether the Reference text
-        contains information that can answer the Question. Please focus on whether the very specific
-        question can be answered by the information in the Reference text.
-        Your response must be single word, either "relevant" or "unrelated",
-        and should not contain any text or characters aside from that word.
-        "unrelated" means that the reference text does not contain an answer to the Question.
-        "relevant" means the reference text contains an answer to the Question."""
-        return input_prompt
+        template = Template(self.base_prompt)
+        rendered_prompt = template.render(text=text, query=query)
+        return rendered_prompt
 
     def run_model(self, text, query):
         input_prompt = self.format_input(text, query)
         messages = [{"role": "user", "content": input_prompt}]
 
-        pipe = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
+        pipe = pipeline(
+            "text-generation", model=self.merged_model, tokenizer=self.tokenizer
+        )
 
         generation_args = {
             "max_new_tokens": 5,

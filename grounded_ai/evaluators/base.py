@@ -1,12 +1,12 @@
-from dataclasses import dataclass
-from typing import Optional
-from peft import PeftModel, PeftConfig
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-import torch
 import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional
 
-# Ensure BASE_MODEL_ID has a fallback value or raise a warning/error if not found
+import torch
+from peft import PeftConfig, PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-3-mini-4k-instruct")
 
 
@@ -24,6 +24,11 @@ class BaseEvaluator(ABC):
     @property
     @abstractmethod
     def quantization(self) -> bool:
+        ...
+
+    @property
+    @abstractmethod
+    def base_prompt(self) -> str:
         ...
 
     def warmup(self):

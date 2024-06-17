@@ -1,7 +1,12 @@
-from transformers import pipeline
-import torch
 from dataclasses import dataclass
+
+import torch
+from jinja2 import Template
+from prompt_hub import HALLUCINATION_EVAL_BASE_PROMPT
+from transformers import pipeline
+
 from .base import BaseEvaluator
+
 
 @dataclass
 class HallucinationEvaluator(BaseEvaluator):
@@ -44,22 +49,17 @@ class HallucinationEvaluator(BaseEvaluator):
     # {'hallucinated': 1, 'truthful': 2, 'percentage_hallucinated': 33.33333333333333}
     ```
     """
+
     groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
     quantization: bool = False
+    base_prompt = HALLUCINATION_EVAL_BASE_PROMPT
 
     def format_input(self, query: str, response: str, reference: str = None) -> str:
-        knowledge_line = f"[Knowledge]: {reference}\n" if reference is not None else ""
-        prompt = f"""Your job is to evaluate whether a machine learning model has hallucinated or not.
-    A hallucination occurs when the response is coherent but factually incorrect or nonsensical
-    outputs that are not grounded in the provided context.
-    You are given the following information:
-        ####INFO####
-        {knowledge_line}[User Input]: {query}
-        [Model Response]: {response}
-        ####END INFO####
-    Based on the information provided is the model output a hallucination? Respond with only "yes" or "no"
-    """
-        return prompt
+        template = Template(self.base_prompt)
+        rendered_prompt = template.render(
+            reference=reference, query=query, response=response
+        )
+        return rendered_prompt
 
     def run_model(self, query: str, response: str, reference: str = None) -> str:
         input = self.format_input(query, response, reference)

@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grounded-ai"
-version = "0.0.9-alpha"
+version = "0.0.8"
 description = "A Python package for evaluating LLM application outputs."
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
-  { name = "Josh Longenecker", email = "jl@groundedai.tech" },
+  { name = "Josh Longenecker", email = "info@groundedai.tech" },
 ]
 keywords = [
   "NLP",
@@ -36,7 +36,6 @@ dependencies = [
   "peft>=0.11.1",
   "transformers>=4.0.0",
   "torch==2.3.0",
-  "nvidia-cuda-nvrtc-cu12==12.1.105",
   "accelerate>=0.31.0",
   "flash-attn==2.5.9.post1",
   "bitsandbytes==0.43.1",
