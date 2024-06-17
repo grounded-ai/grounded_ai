@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from jinja2 import Template
-from .prompt_hub import TOXICITY_EVAL_BASE_PROMPT
+from .prompt_hub import TOXICITY_EVAL_BASE
 from transformers import pipeline
 
 from .base import BaseEvaluator
@@ -30,7 +30,7 @@ class ToxicityEvaluator(BaseEvaluator):
     add_reason: bool = False
     groundedai_eval_id = "grounded-ai/phi3-toxicity-judge"
     quantization: bool = False
-    base_prompt = TOXICITY_EVAL_BASE_PROMPT
+    base_prompt = TOXICITY_EVAL_BASE
 
     def format_input(self, text):
         """This function formats the input text for the model"""

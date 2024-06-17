@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from jinja2 import Template
-from .prompt_hub import RAG_RELEVANCE_EVAL_BASE_PROMPT
+from .prompt_hub import RAG_RELEVANCE_EVAL_BASE
 from transformers import pipeline
 
 from .base import BaseEvaluator
@@ -30,7 +30,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
 
     groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
     quantization: bool = False
-    base_prompt = RAG_RELEVANCE_EVAL_BASE_PROMPT
+    base_prompt = RAG_RELEVANCE_EVAL_BASE
 
     def format_input(self, text, query):
         template = Template(self.base_prompt)

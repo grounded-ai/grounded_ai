@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 from jinja2 import Template
-from .prompt_hub import HALLUCINATION_EVAL_BASE_PROMPT
+from .prompt_hub import HALLUCINATION_EVAL_BASE
 from transformers import pipeline
 
 from .base import BaseEvaluator
@@ -52,7 +52,7 @@ class HallucinationEvaluator(BaseEvaluator):
 
     groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
     quantization: bool = False
-    base_prompt = HALLUCINATION_EVAL_BASE_PROMPT
+    base_prompt = HALLUCINATION_EVAL_BASE
 
     def format_input(self, query: str, response: str, reference: str = None) -> str:
         template = Template(self.base_prompt)
