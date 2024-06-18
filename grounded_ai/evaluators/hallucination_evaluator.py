@@ -61,7 +61,7 @@ class HallucinationEvaluator(BaseEvaluator):
         )
         return rendered_prompt
 
-    def run_model(self, query: str, response: str, reference: str = None) -> str:
+    def run_model(self, query: str, response: str, reference: str = "") -> str:
         input = self.format_input(query, response, reference)
         messages = [{"role": "user", "content": input}]
 

@@ -41,14 +41,14 @@ RAG_RELEVANCE_EVAL_BASE = """
 """
 
 HALLUCINATION_EVAL_BASE = """
-        {% set knowledge_line = "[Knowledge]: " + reference + "\n" if reference is not None else "" %}
+       {% set knowledge_line = "" if reference == "" else "[Knowledge]: " + reference + "\n        " %}
         Your job is to evaluate whether a machine learning model has hallucinated or not.
         A hallucination occurs when the response is coherent but factually incorrect or nonsensical
         outputs that are not grounded in the provided context.
         You are given the following information:
-            ####INFO####
-            {{ knowledge_line }}[User Input]: {{ query }}
-            [Model Response]: {{ response }}
-            ####END INFO####
+        ####INFO####
+        {{ knowledge_line }}[User Input]: {{ query }}
+        [Model Response]: {{ response }}
+        ####END INFO####
         Based on the information provided is the model output a hallucination? Respond with only "yes" or "no"
 """
