@@ -52,7 +52,7 @@ class HallucinationEvaluator(BaseEvaluator):
 
     groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
     quantization: bool = False
-    base_prompt = HALLUCINATION_EVAL_BASE
+    base_prompt: str = HALLUCINATION_EVAL_BASE
 
     def format_input(self, query: str, response: str, reference: str = None) -> str:
         template = Template(self.base_prompt)

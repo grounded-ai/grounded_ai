@@ -30,7 +30,7 @@ class ToxicityEvaluator(BaseEvaluator):
     add_reason: bool = False
     groundedai_eval_id = "grounded-ai/phi3-toxicity-judge"
     quantization: bool = False
-    base_prompt = TOXICITY_EVAL_BASE
+    base_prompt: str = TOXICITY_EVAL_BASE
 
     def format_input(self, text):
         """This function formats the input text for the model"""

@@ -30,7 +30,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
 
     groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
     quantization: bool = False
-    base_prompt = RAG_RELEVANCE_EVAL_BASE
+    base_prompt: str = RAG_RELEVANCE_EVAL_BASE
 
     def format_input(self, text, query):
         template = Template(self.base_prompt)
