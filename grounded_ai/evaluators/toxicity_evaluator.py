@@ -1,11 +1,14 @@
 from dataclasses import dataclass
+from typing import List
 
 import torch
 from jinja2 import Template
-from .prompt_hub import TOXICITY_EVAL_BASE
 from transformers import pipeline
 
+from grounded_ai.schema.base_data import EvaluationData
+
 from .base import BaseEvaluator
+from .prompt_hub import TOXICITY_EVAL_BASE
 
 
 @dataclass
@@ -61,20 +64,30 @@ class ToxicityEvaluator(BaseEvaluator):
         torch.cuda.empty_cache()
         return output[0]["generated_text"].strip().lower()
 
-    def evaluate(self, data: list) -> dict:
-        """This function evaluates the toxicity of the given data"""
+    def evaluate(self, data: List[str]) -> dict:
+        try:
+            evaluation_data = EvaluationData(instances=data)
+        except ValueError as e:
+            print(f"Error validating input data: {e}")
+            return {}
+
         toxic = 0
         non_toxic = 0
         reasons = []
-        for item in data:
-            output = self.run_model(item)
+        for instance in evaluation_data.instances:
+            output = self.run_model(instance)
             if "non-toxic" in output:
                 non_toxic += 1
             elif "toxic" in output:
                 toxic += 1
             if self.add_reason:
-                reasons.append((item, output))
-        percentage_toxic = (toxic / len(data)) * 100 if data else 0
+                reasons.append((instance, output))
+
+        percentage_toxic = (
+            (toxic / len(evaluation_data.instances)) * 100
+            if evaluation_data.instances
+            else 0
+        )
         return {
             "toxic": toxic,
             "non-toxic": non_toxic,

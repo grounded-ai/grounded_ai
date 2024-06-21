@@ -2,10 +2,12 @@ from dataclasses import dataclass
 
 import torch
 from jinja2 import Template
-from .prompt_hub import HALLUCINATION_EVAL_BASE
 from transformers import pipeline
 
+from grounded_ai.schema.hallucination_data import EvaluationData
+
 from .base import BaseEvaluator
+from .prompt_hub import HALLUCINATION_EVAL_BASE
 
 
 @dataclass
@@ -83,20 +85,26 @@ class HallucinationEvaluator(BaseEvaluator):
         return output[0]["generated_text"].strip().lower()
 
     def evaluate(self, data: list) -> dict:
+        try:
+            evaluation_data = EvaluationData(instances=data)
+        except ValueError as e:
+            print(f"Error validating input data: {e}")
+            return {}
+
         hallucinated: int = 0
         truthful: int = 0
-        for item in data:
-            if len(item) == 2:
-                query, response = item
-                output = self.run_model(query, response)
-            elif len(item) == 3:
-                query, response, reference = item
-                output = self.run_model(query, response, reference)
+        for instance in evaluation_data.instances:
+            output = self.run_model(
+                instance.query, instance.response, instance.reference
+            )
             if output == "yes":
                 hallucinated += 1
             elif output == "no":
                 truthful += 1
-        percentage_hallucinated: float = (hallucinated / len(data)) * 100
+
+        percentage_hallucinated: float = (
+            hallucinated / len(evaluation_data.instances)
+        ) * 100
         return {
             "hallucinated": hallucinated,
             "truthful": truthful,

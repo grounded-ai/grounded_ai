@@ -1,11 +1,14 @@
 from dataclasses import dataclass
+from typing import List, Tuple
 
 import torch
 from jinja2 import Template
-from .prompt_hub import RAG_RELEVANCE_EVAL_BASE
 from transformers import pipeline
 
+from grounded_ai.schema.base_data import EvaluationData
+
 from .base import BaseEvaluator
+from .prompt_hub import RAG_RELEVANCE_EVAL_BASE
 
 
 @dataclass
@@ -56,16 +59,27 @@ class RagRelevanceEvaluator(BaseEvaluator):
         torch.cuda.empty_cache()
         return output[0]["generated_text"].strip().lower()
 
-    def evaluate(self, data):
+    def evaluate(self, data: List[Tuple[str, str]]) -> dict:
+        try:
+            evaluation_data = EvaluationData(instances=data)
+        except ValueError as e:
+            print(f"Error validating input data: {e}")
+            return {}
+
         relevant = 0
         unrelated = 0
-        for query, text in data:
-            output = self.run_model(text, query)
+        for instance in evaluation_data.instances:
+            output = self.run_model(instance.text, instance.query)
             if output == "relevant":
                 relevant += 1
             elif output == "unrelated":
                 unrelated += 1
-        percentage_relevant = (relevant / len(data)) * 100 if data else 0
+
+        percentage_relevant = (
+            (relevant / len(evaluation_data.instances)) * 100
+            if evaluation_data.instances
+            else 0
+        )
         return {
             "relevant": relevant,
             "unrelated": unrelated,
