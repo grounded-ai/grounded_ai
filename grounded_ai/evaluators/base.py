@@ -32,9 +32,9 @@ class BaseEvaluator(ABC):
         ...
 
     def warmup(self):
-      """Warmup the model by loading it and merging the adapter"""
-      self.load_model()
-      self.merge_adapter(self.groundedai_eval_id)
+        """Warmup the model by loading it and merging the adapter"""
+        self.load_model()
+        self.merge_adapter(self.groundedai_eval_id)
 
     def load_model(self):
         """Loads the base model with or without quantization."""

@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from typing import List
 
 import torch
+from grounded_ai.validators.toxic_data import ToxicityData
 from jinja2 import Template
 from transformers import pipeline
-
-from grounded_ai.schema.base_data import EvaluationData
 
 from .base import BaseEvaluator
 from .prompt_hub import TOXICITY_EVAL_BASE
@@ -66,7 +65,7 @@ class ToxicityEvaluator(BaseEvaluator):
 
     def evaluate(self, data: List[str]) -> dict:
         try:
-            evaluation_data = EvaluationData(instances=data)
+            evaluation_data = ToxicityData(instances=data)
         except ValueError as e:
             print(f"Error validating input data: {e}")
             return {}
@@ -75,7 +74,7 @@ class ToxicityEvaluator(BaseEvaluator):
         non_toxic = 0
         reasons = []
         for instance in evaluation_data.instances:
-            output = self.run_model(instance)
+            output = self.run_model(instance.text)
             if "non-toxic" in output:
                 non_toxic += 1
             elif "toxic" in output:

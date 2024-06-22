@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 import torch
+from grounded_ai.validators.rag_data import RagData
 from jinja2 import Template
 from transformers import pipeline
-
-from grounded_ai.schema.base_data import EvaluationData
 
 from .base import BaseEvaluator
 from .prompt_hub import RAG_RELEVANCE_EVAL_BASE
@@ -61,7 +60,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
 
     def evaluate(self, data: List[Tuple[str, str]]) -> dict:
         try:
-            evaluation_data = EvaluationData(instances=data)
+            evaluation_data = RagData(instances=data)
         except ValueError as e:
             print(f"Error validating input data: {e}")
             return {}
@@ -69,7 +68,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
         relevant = 0
         unrelated = 0
         for instance in evaluation_data.instances:
-            output = self.run_model(instance.text, instance.query)
+            output = self.run_model(instance.context, instance.query)
             if output == "relevant":
                 relevant += 1
             elif output == "unrelated":

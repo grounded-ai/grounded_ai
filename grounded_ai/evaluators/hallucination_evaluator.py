@@ -1,10 +1,10 @@
 from dataclasses import dataclass
+from typing import List, Optional, Tuple, Union
 
 import torch
+from grounded_ai.validators.hallucination_data import HallucinationData
 from jinja2 import Template
 from transformers import pipeline
-
-from grounded_ai.schema.hallucination_data import EvaluationData
 
 from .base import BaseEvaluator
 from .prompt_hub import HALLUCINATION_EVAL_BASE
@@ -84,29 +84,60 @@ class HallucinationEvaluator(BaseEvaluator):
         torch.cuda.empty_cache()
         return output[0]["generated_text"].strip().lower()
 
-    def evaluate(self, data: list) -> dict:
+    def evaluate(
+        self, data: List[Union[Tuple[str, str], Tuple[str, str, Optional[str]]]]
+    ) -> dict:
         try:
-            evaluation_data = EvaluationData(instances=data)
+            evaluation_data = HallucinationData(instances=data)
+            hallucinated: int = 0
+            truthful: int = 0
+            for instance in evaluation_data.instances:
+                output = self.run_model(instance.query, instance.response)
+                if output == "yes":
+                    hallucinated += 1
+                elif output == "no":
+                    truthful += 1
+
+            percentage_hallucinated: float = (
+                (hallucinated / len(evaluation_data.instances)) * 100
+                if evaluation_data.instances
+                else 0
+            )
+            return {
+                "hallucinated": hallucinated,
+                "truthful": truthful,
+                "percentage_hallucinated": percentage_hallucinated,
+            }
         except ValueError as e:
             print(f"Error validating input data: {e}")
-            return {}
+            return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
 
-        hallucinated: int = 0
-        truthful: int = 0
-        for instance in evaluation_data.instances:
-            output = self.run_model(
-                instance.query, instance.response, instance.reference
+    def evaluate_with_references(
+        self, data: List[Union[Tuple[str, str], Tuple[str, str, Optional[str]]]]
+    ) -> dict:
+        try:
+            evaluation_data = HallucinationData(instances=data)
+            hallucinated: int = 0
+            truthful: int = 0
+            for instance in evaluation_data.instances:
+                output = self.run_model(
+                    instance.query, instance.response, instance.reference
+                )
+                if output == "yes":
+                    hallucinated += 1
+                elif output == "no":
+                    truthful += 1
+
+            percentage_hallucinated: float = (
+                (hallucinated / len(evaluation_data.instances)) * 100
+                if evaluation_data.instances
+                else 0
             )
-            if output == "yes":
-                hallucinated += 1
-            elif output == "no":
-                truthful += 1
-
-        percentage_hallucinated: float = (
-            hallucinated / len(evaluation_data.instances)
-        ) * 100
-        return {
-            "hallucinated": hallucinated,
-            "truthful": truthful,
-            "percentage_hallucinated": percentage_hallucinated,
-        }
+            return {
+                "hallucinated": hallucinated,
+                "truthful": truthful,
+                "percentage_hallucinated": percentage_hallucinated,
+            }
+        except ValueError as e:
+            print(f"Error validating input data: {e}")
+            return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
