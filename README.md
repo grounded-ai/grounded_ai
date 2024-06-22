@@ -24,7 +24,7 @@ Our models can be found here: https://huggingface.co/grounded-ai
 Install the `grounded-ai` package from [PyPI](https://pypi.org/project/grounded-ai/):
 
 ```
-pip install grounded-ai==0.0.9-alpha
+pip install grounded-ai==1.0.3
 ```
 
 ### Example Usage: Toxicity Evaluation
