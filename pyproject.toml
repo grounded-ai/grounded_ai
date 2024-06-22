@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grounded-ai"
-version = "1.0.2"
+version = "1.0.5"
 description = "A Python package for evaluating LLM application outputs."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -43,5 +43,5 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/grounded-ai"
-"Bug Tracker" = "https://github.com/grounded-ai/grounded-eval/issues"
+"Homepage" = "https://github.com/grounded-ai/grounded_ai"
+"Bug Tracker" = "https://github.com/grounded-ai/grounded_ai/issues"

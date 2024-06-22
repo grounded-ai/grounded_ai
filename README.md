@@ -61,7 +61,7 @@ Detailed documentation, including API references, examples, and guides, coming s
 
 ### Contributing
 
-We welcome contributions from the community! If you encounter any issues or have suggestions for improvements, please open an issue or submit a pull request on the [GroundedAI grounded-eval GitHub repository](https://github.com/GroundedAI/grounded-eval).
+We welcome contributions from the community! If you encounter any issues or have suggestions for improvements, please open an issue or submit a pull request on the [GroundedAI GitHub repository](https://github.com/grounded-ai/grounded_ai/issues).
 
 ### License
 
