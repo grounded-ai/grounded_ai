@@ -57,7 +57,7 @@ In the output, we can see that out of the two texts, one is classified as toxic,
 
 ### Documentation
 
-Detailed documentation, including API references, examples, and guides, coming soon at [https://groundedai.tech/api](https://groundedai.tech/api).
+Detailed documentation, including examples, and guides here [https://groundedai.tech/api](https://groundedai.tech/docs).
 
 ### Contributing
 
