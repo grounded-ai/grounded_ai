@@ -18,8 +18,8 @@ class EvalMode(str, Enum):
 
 @dataclass
 class BaseEvaluator(ABC):
-    base_model: AutoModelForCausalLM = None
-    tokenizer: AutoTokenizer = None
+    base_model: AutoModelForCausalLM = BASE_MODEL_ID
+    tokenizer: AutoTokenizer = BASE_MODEL_ID
     merged_model: Optional[PeftModel] = None
     use_peft: Optional[bool] = True
     quantization: Optional[bool] = False
