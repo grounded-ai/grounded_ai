@@ -7,7 +7,14 @@ from transformers import pipeline
 
 from .base import BaseEvaluator
 from .prompt_hub import RAG_RELEVANCE_EVAL_BASE, HALLUCINATION_EVAL_BASE, TOXICITY_EVAL_BASE, ANY_EVAL_BASE
-from .utils import *
+from .utils import (
+    evaluate_hallucination, 
+    evaluate_rag, 
+    evaluate_toxicity,
+    format_hallucination,
+    format_rag,
+    format_toxicity,
+)
 
 PROMPT_MAP = {
     "TOXICITY": TOXICITY_EVAL_BASE,
@@ -23,24 +30,29 @@ EVAL_MAP = {
     "ANY": None,
 }
 
+FORMAT_MAP = {
+    "TOXICITY": format_toxicity,
+    "RAG_RELEVANCE": format_rag,
+    "HALLUCINATION": format_hallucination,
+}
+
 @dataclass
 class GroundedAIEvaluator(BaseEvaluator):
+
     """
-    The RAG (Retrieval-Augmented Generation) Evaluator class is used to evaluate the relevance
-    of a given text with respect to a query.
+    GroundedAIEvaluator is a flexible evaluation class for various NLP tasks such as RAG relevance,
+    hallucination detection, and toxicity assessment. It leverages prompt templates and evaluation functions
+    to assess model outputs according to the selected evaluation mode.
 
     Example Usage:
-    ```python
-    evaluator = RagRelevanceEvaluator()
-    evaluator.warmup()
-    data = [
-        ("What is the capital of France?", "Paris is the capital of France."),
-        ("What is the largest planet in our solar system?", "Jupiter is the largest planet in our solar system.")
-    ]
-    response = evaluator.evaluate(data)
-    # Output
-    # {'relevant': 2, 'unrelated': 0, 'percentage_relevant': 100.0}
-    ```
+        evaluator = GroundedAIEvaluator(eval_mode=EvalMode.RAG_RELEVANCE)
+        evaluator.warmup()
+        data = [
+            ("What is the capital of France?", "Paris is the capital of France."),
+            ("What is the largest planet in our solar system?", "Jupiter is the largest planet in our solar system.")
+        ]
+        response = evaluator.evaluate(data)
+        # Output: {'relevant': 2, 'unrelated': 0, 'percentage_relevant': 100.0}
     """
 
     groundedai_eval_id = "grounded-ai/phi4-mini-judge"
@@ -54,13 +66,6 @@ class GroundedAIEvaluator(BaseEvaluator):
         if self.custom_prompt:
             return self.custom_prompt
         return PROMPT_MAP.get(self.eval_mode.value, ANY_EVAL_BASE)
-
-    def __post_init__(self):
-        self.format_func_map = {
-            "TOXICITY": self.format_toxicity,
-            "RAG_RELEVANCE": self.format_rag,
-            "HALLUCINATION": self.format_hallucination,
-        }
 
     def format_input(self, **kwargs):
         format_func = self.format_func_map.get(self.eval_mode.value)
@@ -79,10 +84,11 @@ class GroundedAIEvaluator(BaseEvaluator):
         
         input_prompt = self.format_input(**kwargs)
         
-        # TODO add check for reasoning beaing true, if so just change the system prompt
+        # TODO add check for reasoning being true, if so just change the system prompt
         messages = [{"role": "user", "content": input_prompt}]
-        pipe = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
-        output = pipe(messages, **self.generation_args)
+        if self._pipeline is None:
+            self._pipeline = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
+        output = self._pipeline(messages, **self.generation_args)
         torch.cuda.empty_cache()
         return output[0]["generated_text"].strip().lower()
 
