@@ -46,14 +46,10 @@ class BaseEvaluator(ABC):
         compute_dtype = (
             torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         )
-        attn_implementation = (
-            "flash_attention_2" if torch.cuda.is_bf16_supported() else "sdpa"
-        )
 
         tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
         model_kwargs = {
-            "attn_implementation": attn_implementation,
-            "torch_dtype": compute_dtype,
+            "dtype": compute_dtype,
         }
         if self.quantization:
             model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
