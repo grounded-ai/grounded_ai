@@ -30,7 +30,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
     ```
     """
 
-    groundedai_eval_id = "grounded-ai/phi3-rag-relevance-judge"
+    groundedai_eval_id = "grounded-ai/phi4-mini-judge"
     quantization: bool = False
     base_prompt: str = RAG_RELEVANCE_EVAL_BASE
 
@@ -39,7 +39,7 @@ class RagRelevanceEvaluator(BaseEvaluator):
         rendered_prompt = template.render(text=text, query=query)
         return rendered_prompt
 
-    def run_model(self, text, query):
+    def run_model(self, text, query, generation_args):
         input_prompt = self.format_input(text, query)
         messages = [{"role": "user", "content": input_prompt}]
 

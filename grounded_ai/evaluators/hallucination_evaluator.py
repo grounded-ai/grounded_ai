@@ -52,7 +52,7 @@ class HallucinationEvaluator(BaseEvaluator):
     ```
     """
 
-    groundedai_eval_id = "grounded-ai/phi3-hallucination-judge"
+    groundedai_eval_id = "grounded-ai/phi4-mini-judge"
     quantization: bool = False
     base_prompt: str = HALLUCINATION_EVAL_BASE
 

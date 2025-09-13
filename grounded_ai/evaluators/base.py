@@ -8,7 +8,7 @@ import torch
 from peft import PeftConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-3.5-mini-instruct")
+BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-4-mini-instruct")
 
 class EvalMode(str, Enum):
     ANY = "ANY"
