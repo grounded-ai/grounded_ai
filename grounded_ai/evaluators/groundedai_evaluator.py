@@ -5,13 +5,13 @@ import torch
 # from grounded_ai.validators.rag_data import RagData
 from transformers import pipeline
 
-from .base import BaseEvaluator
+from .base import BaseEvaluator, EvalMode
 from .prompt_hub import (
-  RAG_RELEVANCE_EVAL_BASE, 
-  HALLUCINATION_EVAL_BASE, 
-  TOXICITY_EVAL_BASE, 
-  ANY_EVAL_BASE,
-  SYSTEM_PROMPT_BASE
+        RAG_RELEVANCE_EVAL_BASE, 
+        HALLUCINATION_EVAL_BASE, 
+        TOXICITY_EVAL_BASE, 
+        ANY_EVAL_BASE,
+        SYSTEM_PROMPT_BASE
 )
 from .utils import (
     evaluate_hallucination, 
@@ -23,23 +23,23 @@ from .utils import (
 )
 
 PROMPT_MAP = {
-    "TOXICITY": TOXICITY_EVAL_BASE,
-    "RAG_RELEVANCE": RAG_RELEVANCE_EVAL_BASE,
-    "HALLUCINATION": HALLUCINATION_EVAL_BASE,
-    "ANY": ANY_EVAL_BASE,
+    EvalMode.TOXICITY: TOXICITY_EVAL_BASE,
+    EvalMode.RAG_RELEVANCE: RAG_RELEVANCE_EVAL_BASE,
+    EvalMode.HALLUCINATION: HALLUCINATION_EVAL_BASE,
+    EvalMode.ANY: ANY_EVAL_BASE,
 }
 
 EVAL_MAP = {
-    "TOXICITY": evaluate_toxicity,
-    "RAG_RELEVANCE": evaluate_rag,
-    "HALLUCINATION": evaluate_hallucination,
-    "ANY": None,
+    EvalMode.TOXICITY: evaluate_toxicity,
+    EvalMode.RAG_RELEVANCE: evaluate_rag,
+    EvalMode.HALLUCINATION: evaluate_hallucination,
+    EvalMode.ANY: None,
 }
 
 FORMAT_MAP = {
-    "TOXICITY": format_toxicity,
-    "RAG_RELEVANCE": format_rag,
-    "HALLUCINATION": format_hallucination,
+    EvalMode.TOXICITY: format_toxicity,
+    EvalMode.RAG_RELEVANCE: format_rag,
+    EvalMode.HALLUCINATION: format_hallucination,
 }
 
 @dataclass

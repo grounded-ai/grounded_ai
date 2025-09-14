@@ -1,9 +1,9 @@
 from typing import Optional, List, Tuple, Union
 import re
 from jinja2 import Template
-from ..validators.hallucination_data import HallucinationData
-from ..validators.rag_data import RagData
-from ..validators.toxic_data import ToxicityData
+from grounded_ai.validators.hallucination_data import HallucinationData
+from grounded_ai.validators.rag_data import RagData
+from grounded_ai.validators.toxic_data import ToxicityData
 
 def extract_rating(response: str) -> Optional[int]:
     """
@@ -47,9 +47,7 @@ def evaluate_rag(evaluator, data: List[Tuple[str, str]]) -> dict:
         for instance in evaluation_data.instances:
             instance = instance.model_dump()
             output = evaluator.run_model(instance)
-            print(output)
             output = extract_rating(output)
-            print(output)
             if output == "relevant":
                 relevant += 1
             elif output == "unrelated":
@@ -77,7 +75,9 @@ def evaluate_toxicity(evaluator, data: List[str]) -> dict:
         non_toxic = 0
         reasons = []
         for instance in evaluation_data.instances:
-            output = evaluator.run_model(instance.text)
+            instance = instance.model_dump()
+            output = evaluator.run_model(instance)
+            output = extract_rating(output)
             if "non-toxic" in output:
                 non_toxic += 1
             elif "toxic" in output:
@@ -105,7 +105,9 @@ def evaluate_hallucination(
             hallucinated: int = 0
             truthful: int = 0
             for instance in evaluation_data.instances:
-                output = evaluator.run_model(instance.query, instance.response)
+                instance = instance.model_dump()
+                output = evaluator.run_model(instance)
+                output = extract_rating(output)
                 if output == "yes":
                     hallucinated += 1
                 elif output == "no":
@@ -133,9 +135,9 @@ def evaluate_hallucination_with_references(
         hallucinated: int = 0
         truthful: int = 0
         for instance in evaluation_data.instances:
-            output = evaluator.run_model(
-                instance.query, instance.response, instance.reference
-            )
+            instance = instance.model_dump()
+            output = evaluator.run_model(instance)
+            output = extract_rating(output)
             if output == "yes":
                 hallucinated += 1
             elif output == "no":
