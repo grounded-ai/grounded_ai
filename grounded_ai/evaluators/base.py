@@ -23,7 +23,7 @@ class BaseEvaluator(ABC):
     merged_model: Optional[PeftModel] = None
     use_peft: bool = True
     quantization: bool = False
-    eval_mode: EvalMode = EvalMode.TOXICITY
+    eval_mode: EvalMode = None
     grounded_ai_eval_id: Optional[str] = None
 
     def warmup(self):
