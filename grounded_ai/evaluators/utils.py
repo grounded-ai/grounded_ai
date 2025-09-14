@@ -18,7 +18,7 @@ def extract_rating(response: str) -> Optional[int]:
     Returns:
         Optional[int]: The extracted rating as an integer, or None if not found.
     """
-    match = re.search(r"<rating>(\w+)</rating>", response)
+    match = re.search(r"<rating>(.*?)</rating>", response)
     if match:
         return match.group(1)
     return "No rating found in response."
