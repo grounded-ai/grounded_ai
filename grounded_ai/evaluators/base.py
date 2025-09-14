@@ -20,20 +20,13 @@ class EvalMode(str, Enum):
 
 @dataclass
 class BaseEvaluator(ABC):
-    base_model: AutoModelForCausalLM = BASE_MODEL_ID
-    tokenizer: AutoTokenizer = BASE_MODEL_ID
+    base_model: AutoModelForCausalLM
+    base_prompt: str
     merged_model: Optional[PeftModel] = None
     use_peft: Optional[bool] = True
     quantization: Optional[bool] = False
     eval_mode: EvalMode = EvalMode.ANY
-
-    @property
-    @abstractmethod
-    def groundedai_eval_id(self) -> str: ...
-
-    @property
-    @abstractmethod
-    def base_prompt(self) -> str: ...
+    groundedai_eval_id: Optional[str] = None
 
     def warmup(self):
         """Warmup the model by loading it and merging the adapter if necessary."""
@@ -53,9 +46,7 @@ class BaseEvaluator(ABC):
         }
         if self.quantization:
             model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-        base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_ID, **model_kwargs)
-
-        self.base_model = base_model
+        self.base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_ID, **model_kwargs)
         self.tokenizer = tokenizer
 
     def merge_adapter(self, groundedai_eval_id: str):
