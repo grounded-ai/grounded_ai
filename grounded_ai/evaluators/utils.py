@@ -168,7 +168,7 @@ def evaluate_toxicity(evaluator, data: List[str]) -> dict:
         elif "toxic" in classification:
             toxic += 1
         if evaluator.add_reasoning:
-            reasons.append((instance, output))
+            reasons.append((output_instance.reasoning))
 
     percentage_toxic = (
         (toxic / len(evaluation_data.instances)) * 100
@@ -238,7 +238,6 @@ def evaluate_hallucination_with_references(
             output_instance = OutputInstance(raw_response=output)
             classification = output_instance.rating
 
-            # Log individual instance if debug mode is enabled
             log_instance(i + 1, instance, output, classification)
 
             if classification == "yes":
@@ -264,7 +263,7 @@ def evaluate_hallucination_with_references(
 def format_toxicity(evaluator, instance):
     text = instance.get("text", "")
     template = Template(evaluator.base_prompt)
-    rendered_prompt = template.render(text=text)
+    rendered_prompt = template.render(text=text, add_reasoning=evaluator.add_reasoning)
     return rendered_prompt
 
 

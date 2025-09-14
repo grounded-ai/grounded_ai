@@ -91,7 +91,6 @@ class GroundedAIEvaluator(BaseEvaluator):
             }
 
         input_prompt = self.format_input(instance)
-
         
         messages = [
             {"role": "system", "content": self.system_prompt},
