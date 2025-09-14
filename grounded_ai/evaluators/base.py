@@ -20,19 +20,19 @@ class EvalMode(str, Enum):
 
 @dataclass
 class BaseEvaluator(ABC):
-    base_model: AutoModelForCausalLM
-    base_prompt: str
+    base_model: str = BASE_MODEL_ID
+    base_prompt: Optional[str] = None
     merged_model: Optional[PeftModel] = None
-    use_peft: Optional[bool] = True
-    quantization: Optional[bool] = False
+    use_peft: bool = True
+    quantization: bool = False
     eval_mode: EvalMode = EvalMode.ANY
-    groundedai_eval_id: Optional[str] = None
+    grounded_ai_eval_id: Optional[str] = None
 
     def warmup(self):
         """Warmup the model by loading it and merging the adapter if necessary."""
         self.load_model()
         if self.use_peft:
-            self.merge_adapter(self.groundedai_eval_id)
+            self.merge_adapter(self.grounded_ai_eval_id)
 
     def load_model(self):
         """Loads the base model with or without quantization."""
@@ -49,22 +49,26 @@ class BaseEvaluator(ABC):
         self.base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_ID, **model_kwargs)
         self.tokenizer = tokenizer
 
-    def merge_adapter(self, groundedai_eval_id: str):
+    def merge_adapter(self, grounded_ai_eval_id: str):
         """Merges the PEFT adapter into the base model."""
-        config = PeftConfig.from_pretrained(groundedai_eval_id)
+        config = PeftConfig.from_pretrained(grounded_ai_eval_id)
         model_peft = PeftModel.from_pretrained(
-            self.base_model, groundedai_eval_id, config=config
+            self.base_model, grounded_ai_eval_id, config=config
         )
         self.merged_model = model_peft.merge_and_unload()
         if not self.quantization:
             self.merged_model.to("cuda")
 
     @abstractmethod
-    def format_input(self, input_text: str) -> str:
+    def base_prompt(self) -> str:
         pass
 
     @abstractmethod
-    def run_model(self, input_text: str) -> str:
+    def format_input(self, instance: dict) -> str:
+        pass
+
+    @abstractmethod
+    def run_model(self, instance: dict) -> str:
         pass
 
     @abstractmethod

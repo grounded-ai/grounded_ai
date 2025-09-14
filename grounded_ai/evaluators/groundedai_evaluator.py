@@ -60,23 +60,26 @@ class GroundedAIEvaluator(BaseEvaluator):
         # Output: {'relevant': 2, 'unrelated': 0, 'percentage_relevant': 100.0}
     """
 
-    groundedai_eval_id = "grounded-ai/phi4-mini-judge"
+    grounded_ai_eval_id: str = "grounded-ai/phi4-mini-judge"
     quantization: bool = False
     add_reasoning: bool = False
     generation_args: Optional[dict] = None
-    pipeline = None
+    pipeline: Optional[object] = None
+    custom_prompt: Optional[str] = None
 
     @property
     def base_prompt(self) -> str:
+        if self.custom_prompt:
+            return self.custom_prompt
         return PROMPT_MAP.get(self.eval_mode, ANY_EVAL_BASE)
 
-    def format_input(self, instance):
+    def format_input(self, instance: dict) -> str:
         format_func = FORMAT_MAP.get(self.eval_mode)
         if not format_func:
             raise ValueError(f"No formatter for eval_mode: {self.eval_mode}")
         return format_func(self, instance)
 
-    def run_model(self, instance):
+    def run_model(self, instance: dict) -> str:
         if not self.generation_args:
             self.generation_args = {
                 "max_new_tokens": 10,
