@@ -21,7 +21,6 @@ class EvalMode(str, Enum):
 @dataclass
 class BaseEvaluator(ABC):
     base_model: str = BASE_MODEL_ID
-    base_prompt: Optional[str] = None
     merged_model: Optional[PeftModel] = None
     use_peft: bool = True
     quantization: bool = False
@@ -46,7 +45,9 @@ class BaseEvaluator(ABC):
         }
         if self.quantization:
             model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
-        self.base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_ID, **model_kwargs)
+        self.base_model = AutoModelForCausalLM.from_pretrained(
+            BASE_MODEL_ID, **model_kwargs
+        )
         self.tokenizer = tokenizer
 
     def merge_adapter(self, grounded_ai_eval_id: str):
