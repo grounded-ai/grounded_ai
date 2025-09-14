@@ -67,13 +67,13 @@ class GroundedAIEvaluator(BaseEvaluator):
             return self.custom_prompt
         return PROMPT_MAP.get(self.eval_mode.value, ANY_EVAL_BASE)
 
-    def format_input(self, **kwargs):
+    def format_input(self, instance):
         format_func = self.format_func_map.get(self.eval_mode.value)
         if not format_func:
             raise ValueError(f"No formatter for eval_mode: {self.eval_mode.value}")
-        return format_func(**kwargs)
+        return format_func(instance)
 
-    def run_model(self, **kwargs):
+    def run_model(self, instance):
         if not self.generation_args:
             self.generation_args = {
                 "max_new_tokens": 10,
@@ -82,7 +82,7 @@ class GroundedAIEvaluator(BaseEvaluator):
                 "pad_token_id": self.tokenizer.eos_token_id
             }
         
-        input_prompt = self.format_input(**kwargs)
+        input_prompt = self.format_input(instance)
         
         # TODO add check for reasoning being true, if so just change the system prompt
         messages = [{"role": "user", "content": input_prompt}]

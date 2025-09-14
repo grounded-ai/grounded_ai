@@ -45,7 +45,8 @@ def evaluate_rag(evaluator, data: List[Tuple[str, str]]) -> dict:
         relevant = 0
         unrelated = 0
         for instance in evaluation_data.instances:
-            output = evaluator.run_model(instance.context, instance.query)
+            instance = instance.model_dump()
+            output = evaluator.run_model(instance)
             if output == "relevant":
                 relevant += 1
             elif output == "unrelated":
@@ -151,23 +152,23 @@ def evaluate_hallucination_with_references(
         print(f"Error validating input data: {e}")
         return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
     
-def format_toxicity(self, **kwargs):
-        text = kwargs.get("text", "")
+def format_toxicity(self, instance):
+        text = instance.get("text", "")
         template = Template(self.base_prompt)
         rendered_prompt = template.render(text=text)
         return rendered_prompt
 
-def format_rag(self, **kwargs):
-    text = kwargs.get("text", "")
-    query = kwargs.get("query", "")
+def format_rag(self, instance):
+    text = instance.get("text", "")
+    query = instance.get("query", "")
     template = Template(self.base_prompt)
     rendered_prompt = template.render(text=text, query=query)
     return rendered_prompt
 
-def format_hallucination(self, **kwargs):
-    query = kwargs.get("query", "")
-    response = kwargs.get("response", "")
-    reference = kwargs.get("reference", "")
+def format_hallucination(self, instance):
+    query = instance.get("query", "")
+    response = instance.get("response", "")
+    reference = instance.get("reference", "")
     template = Template(self.base_prompt)
     rendered_prompt = template.render(
         reference=reference, query=query, response=response
