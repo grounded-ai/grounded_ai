@@ -1,21 +1,20 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
 import torch
-# from grounded_ai.validators.rag_data import RagData
 from transformers import pipeline
 
 from .base import BaseEvaluator, EvalMode
 from .prompt_hub import (
-        RAG_RELEVANCE_EVAL_BASE, 
-        HALLUCINATION_EVAL_BASE, 
-        TOXICITY_EVAL_BASE, 
-        ANY_EVAL_BASE,
-        SYSTEM_PROMPT_BASE
+    ANY_EVAL_BASE,
+    HALLUCINATION_EVAL_BASE,
+    RAG_RELEVANCE_EVAL_BASE,
+    SYSTEM_PROMPT_BASE,
+    TOXICITY_EVAL_BASE,
 )
 from .utils import (
-    evaluate_hallucination, 
-    evaluate_rag, 
+    evaluate_hallucination,
+    evaluate_rag,
     evaluate_toxicity,
     format_hallucination,
     format_rag,
@@ -42,9 +41,9 @@ FORMAT_MAP = {
     EvalMode.HALLUCINATION: format_hallucination,
 }
 
+
 @dataclass
 class GroundedAIEvaluator(BaseEvaluator):
-
     """
     GroundedAIEvaluator is a flexible evaluation class for various NLP tasks such as RAG relevance,
     hallucination detection, and toxicity assessment. It leverages prompt templates and evaluation functions
@@ -86,21 +85,23 @@ class GroundedAIEvaluator(BaseEvaluator):
                 "max_new_tokens": 10,
                 "temperature": 0.1,
                 "do_sample": True,
-                "pad_token_id": self.tokenizer.eos_token_id
+                "pad_token_id": self.tokenizer.eos_token_id,
             }
-        
+
         input_prompt = self.format_input(instance)
-        
+
         # TODO add check for reasoning being true, if so just change the system prompt
         messages = [
-          {"role": "system", "content": SYSTEM_PROMPT_BASE},
-          {"role": "user", "content": input_prompt}
-          ]
+            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {"role": "user", "content": input_prompt},
+        ]
         if self.pipeline is None:
-            self.pipeline = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
+            self.pipeline = pipeline(
+                "text-generation", model=self.merged_model, tokenizer=self.tokenizer
+            )
         output = self.pipeline(messages, **self.generation_args)
         torch.cuda.empty_cache()
-        return output[0]["generated_text"][2]['content'].strip().lower()
+        return output[0]["generated_text"][2]["content"].strip().lower()
 
     def evaluate(self, data: List[Tuple[str, str]]) -> dict:
         eval_func = EVAL_MAP.get(self.eval_mode)

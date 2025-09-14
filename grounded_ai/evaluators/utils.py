@@ -1,9 +1,12 @@
-from typing import Optional, List, Tuple, Union
 import re
+from typing import List, Optional, Tuple, Union
+
 from jinja2 import Template
+
 from grounded_ai.validators.hallucination_data import HallucinationData
 from grounded_ai.validators.rag_data import RagData
 from grounded_ai.validators.toxic_data import ToxicityData
+
 
 def extract_rating(response: str) -> Optional[int]:
     """
@@ -20,6 +23,7 @@ def extract_rating(response: str) -> Optional[int]:
         return match.group(1)
     return "No rating found in response."
 
+
 def extract_reasoning(response: str) -> Optional[str]:
     """
     Extracts reasoning from the model's response.
@@ -35,97 +39,101 @@ def extract_reasoning(response: str) -> Optional[str]:
         return match.group(1).strip()
     return "No reasoning found in response."
 
+
 def evaluate_rag(evaluator, data: List[Tuple[str, str]]) -> dict:
-        try:
-            evaluation_data = RagData(instances=data)
-        except ValueError as e:
-            print(f"Error validating input data: {e}")
-            return {}
+    try:
+        evaluation_data = RagData(instances=data)
+    except ValueError as e:
+        print(f"Error validating input data: {e}")
+        return {}
 
-        relevant = 0
-        unrelated = 0
-        for instance in evaluation_data.instances:
-            instance = instance.model_dump()
-            output = evaluator.run_model(instance)
-            output = extract_rating(output)
-            if output == "relevant":
-                relevant += 1
-            elif output == "unrelated":
-                unrelated += 1
+    relevant = 0
+    unrelated = 0
+    for instance in evaluation_data.instances:
+        instance = instance.model_dump()
+        output = evaluator.run_model(instance)
+        output = extract_rating(output)
+        if output == "relevant":
+            relevant += 1
+        elif output == "unrelated":
+            unrelated += 1
 
-        percentage_relevant = (
-            (relevant / len(evaluation_data.instances)) * 100
-            if evaluation_data.instances
-            else 0
-        )
-        return {
-            "relevant": relevant,
-            "unrelated": unrelated,
-            "percentage_relevant": percentage_relevant,
-        }
+    percentage_relevant = (
+        (relevant / len(evaluation_data.instances)) * 100
+        if evaluation_data.instances
+        else 0
+    )
+    return {
+        "relevant": relevant,
+        "unrelated": unrelated,
+        "percentage_relevant": percentage_relevant,
+    }
+
 
 def evaluate_toxicity(evaluator, data: List[str]) -> dict:
-        try:
-            evaluation_data = ToxicityData(instances=data)
-        except ValueError as e:
-            print(f"Error validating input data: {e}")
-            return {}
+    try:
+        evaluation_data = ToxicityData(instances=data)
+    except ValueError as e:
+        print(f"Error validating input data: {e}")
+        return {}
 
-        toxic = 0
-        non_toxic = 0
-        reasons = []
+    toxic = 0
+    non_toxic = 0
+    reasons = []
+    for instance in evaluation_data.instances:
+        instance = instance.model_dump()
+        output = evaluator.run_model(instance)
+        output = extract_rating(output)
+        if "non-toxic" in output:
+            non_toxic += 1
+        elif "toxic" in output:
+            toxic += 1
+        if evaluator.add_reason:
+            reasons.append((instance, output))
+
+    percentage_toxic = (
+        (toxic / len(evaluation_data.instances)) * 100
+        if evaluation_data.instances
+        else 0
+    )
+    return {
+        "toxic": toxic,
+        "non-toxic": non_toxic,
+        "percentage_toxic": percentage_toxic,
+        "reasons": reasons,
+    }
+
+
+def evaluate_hallucination(
+    evaluator, data: List[Union[Tuple[str, str], Tuple[str, str, Optional[str]]]]
+) -> dict:
+    try:
+        evaluation_data = HallucinationData(instances=data)
+        hallucinated: int = 0
+        truthful: int = 0
         for instance in evaluation_data.instances:
             instance = instance.model_dump()
             output = evaluator.run_model(instance)
             output = extract_rating(output)
-            if "non-toxic" in output:
-                non_toxic += 1
-            elif "toxic" in output:
-                toxic += 1
-            if evaluator.add_reason:
-                reasons.append((instance, output))
+            if output == "yes":
+                hallucinated += 1
+            elif output == "no":
+                truthful += 1
 
-        percentage_toxic = (
-            (toxic / len(evaluation_data.instances)) * 100
+        percentage_hallucinated: float = (
+            (hallucinated / len(evaluation_data.instances)) * 100
             if evaluation_data.instances
             else 0
         )
         return {
-            "toxic": toxic,
-            "non-toxic": non_toxic,
-            "percentage_toxic": percentage_toxic,
-            "reasons": reasons,
+            "hallucinated": hallucinated,
+            "truthful": truthful,
+            "percentage_hallucinated": percentage_hallucinated,
         }
+    except ValueError as e:
+        print(f"Error validating input data: {e}")
+        return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
 
-def evaluate_hallucination(
-        evaluator, data: List[Union[Tuple[str, str], Tuple[str, str, Optional[str]]]]
-    ) -> dict:
-        try:
-            evaluation_data = HallucinationData(instances=data)
-            hallucinated: int = 0
-            truthful: int = 0
-            for instance in evaluation_data.instances:
-                instance = instance.model_dump()
-                output = evaluator.run_model(instance)
-                output = extract_rating(output)
-                if output == "yes":
-                    hallucinated += 1
-                elif output == "no":
-                    truthful += 1
-
-            percentage_hallucinated: float = (
-                (hallucinated / len(evaluation_data.instances)) * 100
-                if evaluation_data.instances
-                else 0
-            )
-            return {
-                "hallucinated": hallucinated,
-                "truthful": truthful,
-                "percentage_hallucinated": percentage_hallucinated,
-            }
-        except ValueError as e:
-            print(f"Error validating input data: {e}")
-            return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
 
 def evaluate_hallucination_with_references(
     evaluator, data: List[Union[Tuple[str, str], Tuple[str, str, Optional[str]]]]
@@ -156,12 +164,14 @@ def evaluate_hallucination_with_references(
     except ValueError as e:
         print(f"Error validating input data: {e}")
         return {"hallucinated": 0, "truthful": 0, "percentage_hallucinated": 0.0}
-    
+
+
 def format_toxicity(evaluator, instance):
-        text = instance.get("text", "")
-        template = Template(evaluator.base_prompt)
-        rendered_prompt = template.render(text=text)
-        return rendered_prompt
+    text = instance.get("text", "")
+    template = Template(evaluator.base_prompt)
+    rendered_prompt = template.render(text=text)
+    return rendered_prompt
+
 
 def format_rag(evaluator, instance):
     context = instance.get("context", "")
@@ -169,6 +179,7 @@ def format_rag(evaluator, instance):
     template = Template(evaluator.base_prompt)
     rendered_prompt = template.render(text=context, query=query)
     return rendered_prompt
+
 
 def format_hallucination(evaluator, instance):
     query = instance.get("query", "")

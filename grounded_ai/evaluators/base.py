@@ -1,8 +1,8 @@
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
 from enum import Enum
+from typing import Optional
 
 import torch
 from peft import PeftConfig, PeftModel
@@ -10,11 +10,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-4-mini-instruct")
 
+
 class EvalMode(str, Enum):
     ANY = "ANY"
     TOXICITY = "TOXICITY"
     RAG_RELEVANCE = "RAG_RELEVANCE"
     HALLUCINATION = "HALLUCINATION"
+
 
 @dataclass
 class BaseEvaluator(ABC):
@@ -27,13 +29,11 @@ class BaseEvaluator(ABC):
 
     @property
     @abstractmethod
-    def groundedai_eval_id(self) -> str:
-        ...
+    def groundedai_eval_id(self) -> str: ...
 
     @property
     @abstractmethod
-    def base_prompt(self) -> str:
-        ...
+    def base_prompt(self) -> str: ...
 
     def warmup(self):
         """Warmup the model by loading it and merging the adapter if necessary."""
