@@ -285,3 +285,8 @@ def format_hallucination(evaluator, instance):
         reference=reference, query=query, response=response
     )
     return rendered_prompt
+
+def format_system(add_reasoning: bool, system):
+    template = Template(system)
+    rendered_system = template.render(add_reasoning=add_reasoning)
+    return rendered_system

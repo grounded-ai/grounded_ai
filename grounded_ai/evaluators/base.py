@@ -12,7 +12,6 @@ BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-4-mini-instruct")
 
 
 class EvalMode(str, Enum):
-    ANY = "ANY"
     TOXICITY = "TOXICITY"
     RAG_RELEVANCE = "RAG_RELEVANCE"
     HALLUCINATION = "HALLUCINATION"

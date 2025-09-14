@@ -19,6 +19,7 @@ from .utils import (
     format_hallucination,
     format_rag,
     format_toxicity,
+    format_system
 )
 
 PROMPT_MAP = {
@@ -82,7 +83,7 @@ class GroundedAIEvaluator(BaseEvaluator):
     def run_model(self, instance: dict) -> str:
         if not self.generation_args:
             self.generation_args = {
-                "max_new_tokens": 10,
+                "max_new_tokens": 10 if not self.add_reasoning else 512,
                 "temperature": 0.1,
                 "do_sample": True,
                 "pad_token_id": self.tokenizer.eos_token_id,
@@ -90,9 +91,9 @@ class GroundedAIEvaluator(BaseEvaluator):
 
         input_prompt = self.format_input(instance)
 
-        # TODO add check for reasoning being true, if so just change the system prompt
+        system = format_system(self.add_reasoning, SYSTEM_PROMPT_BASE)
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {"role": "system", "content": system},
             {"role": "user", "content": input_prompt},
         ]
         if self.pipeline is None:
