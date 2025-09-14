@@ -1,4 +1,3 @@
-from .evaluators import GroundedAIEvaluator
-from . import validators
+from .groundedai_evaluator import GroundedAIEvaluator
 
-__all__ = ["GroundedAIEvaluator", "validators"]
+__all__ = ["GroundedAIEvaluator"]
