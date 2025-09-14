@@ -63,20 +63,17 @@ class GroundedAIEvaluator(BaseEvaluator):
     groundedai_eval_id = "grounded-ai/phi4-mini-judge"
     quantization: bool = False
     add_reasoning: bool = False
-    custom_prompt: Optional[str] = None
     generation_args: Optional[dict] = None
     pipeline = None
 
     @property
     def base_prompt(self) -> str:
-        if self.custom_prompt:
-            return self.custom_prompt
         return PROMPT_MAP.get(self.eval_mode, ANY_EVAL_BASE)
 
     def format_input(self, instance):
         format_func = FORMAT_MAP.get(self.eval_mode)
         if not format_func:
-            raise ValueError(f"No formatter for eval_mode: {self.eval_mode.value}")
+            raise ValueError(f"No formatter for eval_mode: {self.eval_mode}")
         return format_func(self, instance)
 
     def run_model(self, instance):

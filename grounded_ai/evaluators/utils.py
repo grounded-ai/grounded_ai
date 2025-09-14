@@ -88,7 +88,7 @@ def evaluate_toxicity(evaluator, data: List[str]) -> dict:
             non_toxic += 1
         elif "toxic" in output:
             toxic += 1
-        if evaluator.add_reason:
+        if evaluator.add_reasoning:
             reasons.append((instance, output))
 
     percentage_toxic = (
