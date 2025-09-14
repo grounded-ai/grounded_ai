@@ -6,7 +6,13 @@ import torch
 from transformers import pipeline
 
 from .base import BaseEvaluator
-from .prompt_hub import RAG_RELEVANCE_EVAL_BASE, HALLUCINATION_EVAL_BASE, TOXICITY_EVAL_BASE, ANY_EVAL_BASE
+from .prompt_hub import (
+  RAG_RELEVANCE_EVAL_BASE, 
+  HALLUCINATION_EVAL_BASE, 
+  TOXICITY_EVAL_BASE, 
+  ANY_EVAL_BASE,
+  SYSTEM_PROMPT_BASE
+)
 from .utils import (
     evaluate_hallucination, 
     evaluate_rag, 
@@ -60,18 +66,19 @@ class GroundedAIEvaluator(BaseEvaluator):
     add_reasoning: bool = False
     custom_prompt: Optional[str] = None
     generation_args: Optional[dict] = None
+    pipeline = None
 
     @property
     def base_prompt(self) -> str:
         if self.custom_prompt:
             return self.custom_prompt
-        return PROMPT_MAP.get(self.eval_mode.value, ANY_EVAL_BASE)
+        return PROMPT_MAP.get(self.eval_mode, ANY_EVAL_BASE)
 
     def format_input(self, instance):
-        format_func = self.format_func_map.get(self.eval_mode.value)
+        format_func = FORMAT_MAP.get(self.eval_mode)
         if not format_func:
             raise ValueError(f"No formatter for eval_mode: {self.eval_mode.value}")
-        return format_func(instance)
+        return format_func(self, instance)
 
     def run_model(self, instance):
         if not self.generation_args:
@@ -85,13 +92,16 @@ class GroundedAIEvaluator(BaseEvaluator):
         input_prompt = self.format_input(instance)
         
         # TODO add check for reasoning being true, if so just change the system prompt
-        messages = [{"role": "user", "content": input_prompt}]
-        if self._pipeline is None:
-            self._pipeline = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
-        output = self._pipeline(messages, **self.generation_args)
+        messages = [
+          {"role": "system", "content": SYSTEM_PROMPT_BASE},
+          {"role": "user", "content": input_prompt}
+          ]
+        if self.pipeline is None:
+            self.pipeline = pipeline("text-generation", model=self.merged_model, tokenizer=self.tokenizer)
+        output = self.pipeline(messages, **self.generation_args)
         torch.cuda.empty_cache()
-        return output[0]["generated_text"].strip().lower()
+        return output[0]["generated_text"][2]['content'].strip().lower()
 
     def evaluate(self, data: List[Tuple[str, str]]) -> dict:
-        eval_func = EVAL_MAP.get(self.eval_mode.value)
+        eval_func = EVAL_MAP.get(self.eval_mode)
         return eval_func(self, data) if eval_func else {}

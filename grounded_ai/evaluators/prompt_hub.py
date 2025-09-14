@@ -79,7 +79,8 @@ RAG_RELEVANCE_EVAL_BASE = """
         Your response must be single word, either "relevant" or "unrelated",
         and should not contain any text or characters aside from that word.
         "unrelated" means that the reference text does not contain an answer to the Question.
-        "relevant" means the reference text contains an answer to the Question.
+        "relevant" means the reference text contains an answer to the question.
+        Always provide your answer in the tags provided in the output format above.
 """
 
 HALLUCINATION_EVAL_BASE = """
