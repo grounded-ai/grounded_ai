@@ -97,6 +97,3 @@ HALLUCINATION_EVAL_BASE = """
         Based on the information provided is the model output a hallucination? Respond with only "yes" or "no"
         Always provide your answer in the tags provided in the output format above.
 """
-
-ANY_EVAL_BASE = """
-"""

@@ -6,7 +6,6 @@ from transformers import pipeline
 
 from .base import BaseEvaluator, EvalMode
 from .prompt_hub import (
-    ANY_EVAL_BASE,
     HALLUCINATION_EVAL_BASE,
     RAG_RELEVANCE_EVAL_BASE,
     SYSTEM_PROMPT_BASE,
@@ -26,14 +25,12 @@ PROMPT_MAP = {
     EvalMode.TOXICITY: TOXICITY_EVAL_BASE,
     EvalMode.RAG_RELEVANCE: RAG_RELEVANCE_EVAL_BASE,
     EvalMode.HALLUCINATION: HALLUCINATION_EVAL_BASE,
-    EvalMode.ANY: ANY_EVAL_BASE,
 }
 
 EVAL_MAP = {
     EvalMode.TOXICITY: evaluate_toxicity,
     EvalMode.RAG_RELEVANCE: evaluate_rag,
     EvalMode.HALLUCINATION: evaluate_hallucination,
-    EvalMode.ANY: None,
 }
 
 FORMAT_MAP = {
@@ -69,10 +66,14 @@ class GroundedAIEvaluator(BaseEvaluator):
     custom_prompt: Optional[str] = None
 
     @property
+    def system_prompt(self) -> str:
+        return format_system(self.add_reasoning, SYSTEM_PROMPT_BASE)
+
+    @property
     def base_prompt(self) -> str:
         if self.custom_prompt:
             return self.custom_prompt
-        return PROMPT_MAP.get(self.eval_mode, ANY_EVAL_BASE)
+        return PROMPT_MAP.get(self.eval_mode, "")
 
     def format_input(self, instance: dict) -> str:
         format_func = FORMAT_MAP.get(self.eval_mode)
@@ -91,9 +92,9 @@ class GroundedAIEvaluator(BaseEvaluator):
 
         input_prompt = self.format_input(instance)
 
-        system = format_system(self.add_reasoning, SYSTEM_PROMPT_BASE)
+        
         messages = [
-            {"role": "system", "content": system},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": input_prompt},
         ]
         if self.pipeline is None:
