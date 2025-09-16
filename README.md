@@ -13,7 +13,7 @@ Our models can be found here: https://huggingface.co/grounded-ai
   - Potential biases or toxicity
   - Hallucination
 
-- **Small Language Model Integration**: Utilize state-of-the-art small language models, optimized for efficient evaluation tasks, to analyze LLM outputs accurately and quickly.
+- **Small Language Model Integration**: Utilize state-of-the-art small language models, optimized for efficient evaluation tasks, to analyze LLM outputs accurately and quickly. Optionally enable quantization for 4.6GB gpu ram vs 7.3GB gpu ram.
 
 - **Adapter Support**: Leverage GroundedAI's proprietary adapters, such as the `phi3-toxicity-judge` adapter, to fine-tune the small language models for specific domains, tasks, or evaluation criteria, ensuring tailored and precise assessments.
 
