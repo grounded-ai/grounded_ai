@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 class EvaluationInstance(BaseModel):
     query: str
     response: str
-    reference: Optional[str] = None
+    reference: Optional[str] = ""
 
 
 class HallucinationData(BaseModel):
