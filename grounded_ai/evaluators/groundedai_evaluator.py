@@ -60,14 +60,13 @@ class GroundedAIEvaluator(BaseEvaluator):
 
     grounded_ai_eval_id: str = "grounded-ai/phi4-mini-judge"
     quantization: bool = False
-    add_reasoning: bool = False
     generation_args: Optional[dict] = None
-    pipeline: Optional[object] = None
+    pipeline: object = None
     custom_prompt: Optional[str] = None
 
     @property
     def system_prompt(self) -> str:
-        return format_system(self.add_reasoning, SYSTEM_PROMPT_BASE)
+        return format_system(SYSTEM_PROMPT_BASE)
 
     @property
     def base_prompt(self) -> str:
@@ -84,7 +83,7 @@ class GroundedAIEvaluator(BaseEvaluator):
     def run_model(self, instance: dict) -> str:
         if not self.generation_args:
             self.generation_args = {
-                "max_new_tokens": 10 if not self.add_reasoning else 512,
+                "max_new_tokens": 10,
                 "temperature": 0.1,
                 "do_sample": True,
                 "pad_token_id": self.tokenizer.eos_token_id,

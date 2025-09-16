@@ -24,13 +24,11 @@ def debug_eval_logging(func):
 
     @wraps(func)
     def wrapper(evaluator, data, *args, **kwargs):
-        # Check if debug mode is enabled via environment variable
         debug_enabled = os.getenv("GROUNDED_AI_DEBUG", "false").lower() == "true"
 
         if not debug_enabled:
             return func(evaluator, data, *args, **kwargs)
 
-        # Setup logger for debug mode
         logger = logging.getLogger(f"grounded_ai.{func.__name__}")
         if not logger.handlers:
             handler = logging.StreamHandler()
@@ -41,13 +39,11 @@ def debug_eval_logging(func):
             logger.addHandler(handler)
             logger.setLevel(logging.DEBUG)
 
-        # Log function entry and input data overview
         logger.info(f"Starting {func.__name__} with {len(data)} instances")
         logger.debug(
             f"Input data sample: {str(data[:2]) if len(data) > 2 else str(data)}"
         )
 
-        # Call original function
         result = func(evaluator, data, *args, **kwargs)
         logger.info(f"{func.__name__} completed: {result}")
         return result
@@ -95,7 +91,6 @@ def log_instance(
             f"Instance {instance_num}: Query='{str(instance_data.get('query', ''))[:50]}...', Response='{str(instance_data.get('response', ''))[:50]}...'"
         )
 
-    # Log output and classification
     logger.debug(
         f"Instance {instance_num} - Raw output: '{output}', Classification: '{classification}'"
     )
@@ -119,7 +114,6 @@ def evaluate_rag(evaluator, data: List[Tuple[str, str]]) -> dict:
         output_instance = OutputInstance(raw_response=output)
         classification = output_instance.rating
 
-        # Log individual instance if debug mode is enabled
         log_instance(i + 1, instance, output, classification)
 
         if classification == "relevant":
@@ -150,25 +144,23 @@ def evaluate_toxicity(evaluator, data: List[str]) -> dict:
     toxic = 0
     non_toxic = 0
     reasons = []
-    # implement tqdm progress bar
+
     for i, instance in enumerate(
         tqdm(evaluation_data.instances, desc="Evaluating Toxicity")
     ):
-        # for instance in evaluation_data.instances:
         instance = instance.model_dump()
         output = evaluator.run_model(instance)
         output_instance = OutputInstance(raw_response=output)
         classification = output_instance.rating
 
-        # Log individual instance if debug mode is enabled
         log_instance(i + 1, instance, output, classification)
 
         if "non-toxic" in classification:
             non_toxic += 1
         elif "toxic" in classification:
             toxic += 1
-        if evaluator.add_reasoning:
-            reasons.append((output_instance.reasoning))
+        # if evaluator.add_reasoning:
+        #     reasons.append((output_instance.reasoning))
 
     percentage_toxic = (
         (toxic / len(evaluation_data.instances)) * 100
@@ -179,7 +171,7 @@ def evaluate_toxicity(evaluator, data: List[str]) -> dict:
         "toxic": toxic,
         "non-toxic": non_toxic,
         "percentage_toxic": percentage_toxic,
-        "reasons": reasons,
+        # "reasons": reasons ,
     }
 
 
@@ -263,7 +255,7 @@ def evaluate_hallucination_with_references(
 def format_toxicity(evaluator, instance):
     text = instance.get("text", "")
     template = Template(evaluator.base_prompt)
-    rendered_prompt = template.render(text=text, add_reasoning=evaluator.add_reasoning)
+    rendered_prompt = template.render(text=text)
     return rendered_prompt
 
 
@@ -285,7 +277,7 @@ def format_hallucination(evaluator, instance):
     )
     return rendered_prompt
 
-def format_system(add_reasoning: bool, system):
-    template = Template(system)
-    rendered_system = template.render(add_reasoning=add_reasoning)
-    return rendered_system
+def format_system(system):
+    # template = Template(system)
+    # rendered_system = template.render()
+    return system
