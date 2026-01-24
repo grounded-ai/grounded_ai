@@ -50,42 +50,56 @@ class AnthropicBackend(BaseEvaluator):
         
         user_content += f"Content to Evaluate: {input_data.text}"
 
+        # Pydantic's model_json_schema() generates a compliant JSON schema but Anthropic needs additionalProperties=False
         json_schema = EvaluationOutput.model_json_schema()
         
+        # Strip title to reduce tokens and noise if desired, but mainly enforce strictness
+        if "title" in json_schema:
+            del json_schema["title"]
+
+        def _enforce_strict_schema(schema):
+            if isinstance(schema, dict):
+                # Remove unsuported validation keywords
+                for key in ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "title"]:
+                    if key in schema:
+                        del schema[key]
+                
+                if schema.get("type") == "object":
+                    schema["additionalProperties"] = False
+                    if "properties" in schema:
+                        for prop in schema["properties"].values():
+                            _enforce_strict_schema(prop)
+            return schema
+
+        json_schema = _enforce_strict_schema(json_schema)
+        
         try:
-            response = self.client.messages.create(
+            # Use Beta Structured Outputs
+            response = self.client.beta.messages.create(
                 model=self.model_name,
                 max_tokens=1024,
                 system=system_prompt,
                 messages=[
                     {"role": "user", "content": user_content}
                 ],
-                tools=[{
-                    "name": "evaluate_content",
-                    "description": "Output the evaluation result in a structured format.",
-                    "input_schema": json_schema
-                }],
-                tool_choice={"type": "tool", "name": "evaluate_content"},
+                betas=["structured-outputs-2025-11-13"],
+                output_format={
+                    "type": "json_schema",
+                    "schema": json_schema
+                },
                 **self.kwargs
             )
 
-            # Parse the tool use output
-            for content_block in response.content:
-                if content_block.type == "tool_use" and content_block.name == "evaluate_content":
-                    data = content_block.input
-                    return EvaluationOutput(**data)
-
-            return EvaluationError(
-                error_code="OUTPUT_FORMAT_ERROR",
-                message="Anthropic model did not output a structured evaluation using the tool."
-            )
+            # Response is raw string in content[0].text which we parse
+            raw_json = response.content[0].text
+            data = json.loads(raw_json)
+            return EvaluationOutput(**data)
 
         except Exception as e:
             # Catch API errors
             error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
             error_msg = str(e)
             
-            # Try to extract cleaner message from Anthropic/OpenAI style errors
             if hasattr(e, "body") and isinstance(e.body, dict):
                  if "error" in e.body and "message" in e.body["error"]:
                      error_msg = e.body["error"]["message"]
