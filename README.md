@@ -1,169 +1,126 @@
-## GroundedAI
+# GroundedAI
 
-### Overview
+**The Universal Evaluation Interface for LLM Applications.**
 
-The `grounded-ai` package is a powerful tool developed by GroundedAI to evaluate the performance of large language models (LLMs) and their applications. It leverages our own fine tuned small language models and metric specific adapters to compute various metrics, providing insights into the quality and reliability of LLM outputs.
-Our models can be found here: https://huggingface.co/grounded-ai
+`grounded-ai` provides a unified, type-safe Python API to evaluate your LLM application's outputs using either local Small Language Models (SLMs) or frontier Cloud Models (OpenAI, Anthropic).
 
-### Features
+We standardize the **Inputs** (Text, Query, Context) and **Outputs** (Score, Label, Confidence, Reasoning) regardless of the underlying model backend.
 
-- **Metric Evaluation**: Compute a wide range of metrics to assess the performance of LLM outputs, including:
-  - Factual accuracy
-  - Relevance to the given context
-  - Potential biases or toxicity
-  - Hallucination
+## Features
 
-- **Small Language Model Integration**: Utilize state-of-the-art small language models, optimized for efficient evaluation tasks, to analyze LLM outputs accurately and quickly. Optionally enable quantization for 4.6GB gpu ram vs 7.3GB gpu ram.
+- **Unified API**: Switch between local SLMs and cloud providers just by changing the model string.
+- **Strict Typing**: All inputs and outputs are Pydantic models.
+- **Local Privacy**: Run Grounded AI's fine-tuned evaluation models locally on your GPU.
+- **Structured Outputs**: Native support for OpenAI and Anthropic JSON constraints.
 
-- **Adapter Support**: Leverage GroundedAI's proprietary adapters, such as the `phi3-toxicity-judge` adapter, to fine-tune the small language models for specific domains, tasks, or evaluation criteria, ensuring tailored and precise assessments.
+## Implementation Status
 
-- **Flexible Input/Output Handling**: Accept LLM outputs in various formats (text, JSON, etc.) and provide evaluation results in a structured and easily consumable manner.
+| Backend | Status | Description |
+| :--- | :--- | :--- |
+| **Grounded AI SLM** | ✅ **Production** | Our specialized local models for Hallucination, Toxicity, and RAG Relevance. |
+| **OpenAI** | ✅ **Production** | Uses `gpt-4o`/`mini` with strict Structured Outputs (`parse`). |
+| **Anthropic** | ✅ **Production** | Uses `claude-3-5` with Beta Structured Outputs (JSON Schema). |
+| **HuggingFace** | 🚧 **Beta** | Run any generic HF model locally (naive implementation). |
+| **Integrations** | 🏗️ **Planned** | LangSmith Tracing, OpenTelemetry, AWS Bedrock. |
 
-### Getting Started
-
-Install the `grounded-ai` package from [PyPI](https://pypi.org/project/grounded-ai/):
-
-```
-pip install grounded-ai==1.0.3
-```
-
-### Example Usage
-
-The `GroundedAIEvaluator` class provides a unified interface for evaluating LLM outputs across multiple dimensions. Here are examples for different evaluation modes:
-
-#### Toxicity Evaluation
-
-```python
-from grounded_ai.evaluators.groundedai_evaluator import GroundedAIEvaluator
-from grounded_ai.evaluators.base import EvalMode
-
-# Initialize evaluator for toxicity assessment
-evaluator = GroundedAIEvaluator(
-    eval_mode=EvalMode.TOXICITY,
-    quantization=True,  
-    add_reasoning=True
-)
-evaluator.warmup()
-
-data = [
-    "That guy is so stupid and ugly",
-    "Bunnies are the cutest animals in the world",
-    "I really enjoyed that movie"
-]
-
-response = evaluator.evaluate(data)
-print(response)
-# Output: {'toxic': 1, 'non-toxic': 2, 'percentage_toxic': 33.3, 'reasons': [...]}
-```
-
-#### RAG Relevance Evaluation
-
-```python
-# Initialize evaluator for RAG relevance assessment
-evaluator = GroundedAIEvaluator(eval_mode=EvalMode.RAG_RELEVANCE)
-evaluator.warmup()
-
-# Data format: (context, query) tuples
-data = [
-    ("Paris is the capital city of France.", "What is the capital of France?"),
-    ("The weather is sunny today.", "What is the capital of France?")
-]
-
-response = evaluator.evaluate(data)
-print(response)
-# Output: {'relevant': 1, 'unrelated': 1, 'percentage_relevant': 50.0}
-```
-
-#### Hallucination Detection
-
-```python
-# Initialize evaluator for hallucination detection
-evaluator = GroundedAIEvaluator(eval_mode=EvalMode.HALLUCINATION)
-evaluator.warmup()
-
-# Data format: (query, response) or (query, response, reference) tuples
-data = [
-    ("What is 2+2?", "2+2 equals 4"),
-    ("What is the capital of Mars?", "The capital of Mars is New Tokyo")
-]
-
-response = evaluator.evaluate(data)
-print(response)
-# Output: {'hallucinated': 1, 'truthful': 1, 'percentage_hallucinated': 50.0}
-```
-
-### Custom Prompts
-
-For specialized use cases, you can override the default prompts with your own custom evaluation criteria:
-
-#### Custom Toxicity Evaluation
-
-```python
-# Define a custom prompt for domain-specific toxicity evaluation
-custom_toxicity_prompt = """
-Evaluate this text for workplace harassment: {{ text }}
-
-Consider:
-- Discriminatory language
-- Bullying or intimidating behavior  
-- Inappropriate comments about personal characteristics
-
-Respond with either "toxic" or "non-toxic" only.
-"""
-
-evaluator = GroundedAIEvaluator(
-    eval_mode=EvalMode.TOXICITY,
-    custom_prompt=custom_toxicity_prompt
-)
-evaluator.warmup()
-
-data = ["Great job on the project!", "You people always mess things up"]
-response = evaluator.evaluate(data)
-```
-
-#### Custom RAG Evaluation
-
-```python
-# Custom prompt for technical documentation relevance
-custom_rag_prompt = """
-Does this documentation section answer the technical question?
-
-Documentation: {{ text }}
-Question: {{ query }}
-
-Only respond with "relevant" if the documentation directly addresses the question.
-Otherwise respond with "unrelated".
-"""
-
-evaluator = GroundedAIEvaluator(
-    eval_mode=EvalMode.RAG_RELEVANCE,
-    custom_prompt=custom_rag_prompt
-)
-```
-
-#### Debug Mode
-
-Enable detailed logging to see evaluation inputs and outputs:
+## Installation
 
 ```bash
-export GROUNDED_AI_DEBUG=true
-python your_evaluation_script.py
+pip install grounded-ai
+# OR for local GPU support
+pip install grounded-ai[gpu]
 ```
 
-This will provide detailed logs of:
-- Input data validation
-- Individual instance processing
-- Model outputs and classifications
-- Final evaluation results
+## Quick Start
 
-### Documentation
+### 1. Using Grounded AI Local SLMs (Recommended)
 
-Detailed documentation, including examples, and guides here [Documentation](https://groundedai.tech/docs).
+Run specialized evaluation models locally (requires GPU/CUDA recommended).
 
-### Contributing
+```python
+from grounded_ai import Evaluator, EvalMode
 
-We welcome contributions from the community! If you encounter any issues or have suggestions for improvements, please open an issue or submit a pull request on the [GroundedAI GitHub repository](https://github.com/grounded-ai/grounded_ai/issues).
+# Initialize for Hallucination detection
+evaluator = Evaluator(
+    "grounded-ai/hallucination-v1",
+    eval_mode=EvalMode.HALLUCINATION
+)
 
-### License
+result = evaluator.evaluate(
+    text="London is the capital of France.",
+    query="What is the capital?",
+    context="Paris is the capital of France."
+)
 
-The `grounded-ai` package is released under the [MIT License](https://opensource.org/licenses/MIT).
+print(result)
+# score=1.0 label='hallucinated' confidence=0.99 reasoning='Contradicts context.'
+```
+
+### 2. Using OpenAI (GPT-4o)
+
+```python
+import os
+os.environ["OPENAI_API_KEY"] = "sk-..."
+
+evaluator = Evaluator(
+    "openai/gpt-4o",
+    eval_mode="HALLUCINATION" # Optional hint for customized prompting
+)
+
+result = evaluator.evaluate(
+    text="The moon is made of cheese.",
+    context="The moon is made of rock."
+)
+```
+
+### 3. Using Anthropic (Claude 3.5)
+
+```python
+import os
+os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
+
+evaluator = Evaluator("anthropic/claude-3-5-sonnet-20241022")
+
+result = evaluator.evaluate(text="This content is safe.")
+```
+
+## API Reference
+
+### `Evaluator` Factory
+
+```python
+Evaluator(
+    model: str,          # e.g., "grounded-ai/...", "openai/...", "anthropic/..."
+    eval_mode: str,      # Optional: "TOXICITY", "HALLUCINATION", "RAG_RELEVANCE"
+    **kwargs             # Backend-specific args (e.g. quantization=True, temperature=0.0)
+)
+```
+
+### `evaluate()`
+
+```python
+evaluate(
+    text: str,                  # The content to evaluate (response/document)
+    query: Optional[str],       # User question
+    context: Optional[str],     # Retrieved context
+    reference: Optional[str]    # Ground truth answer
+) -> EvaluationOutput | EvaluationError
+```
+
+### Output Schema
+
+```python
+class EvaluationOutput(BaseModel):
+    score: float       # 0.0 to 1.0
+    label: str         # e.g. "faithful", "toxic"
+    confidence: float  # 0.0 to 1.0
+    reasoning: str     # Explanation
+```
+
+## Contributing
+
+We welcome contributions! Please see `TODOs.md` for the current roadmap.
+
+## License
+
+Apache 2.0

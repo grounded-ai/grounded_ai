@@ -1,0 +1,88 @@
+import sys
+import pytest
+from unittest.mock import MagicMock, patch
+
+# Pre-mock openai module to ensure tests run even if package isn't installed
+mock_openai_module = MagicMock()
+sys.modules["openai"] = mock_openai_module
+
+from grounded_ai import Evaluator
+from grounded_ai.schemas import EvaluationInput, EvaluationOutput
+from grounded_ai.backends.openai import OpenAIBackend
+
+class TestOpenAIBackend:
+
+    @pytest.fixture
+    def mock_client(self):
+        """Mocks the OpenAI client and the beta.chat.completions.parse method."""
+        client = MagicMock()
+        mock_completion = MagicMock()
+        
+        # Setup the chain: client.beta.chat.completions.parse(...)
+        client.beta.chat.completions.parse.return_value = mock_completion
+        
+        return client
+
+    def test_factory_routing(self):
+        """Test that 'openai/*' model strings route to OpenAIBackend."""
+        # We need to mock the internal import within the factory or ensure OpenAIBackend can be instantiated
+        # Since we mocked sys.modules["openai"], the import inside __init__.py and openai.py will succeed.
+        
+        with patch("grounded_ai.backends.openai.OpenAI") as MockOpenAI:
+            evaluator = Evaluator("openai/gpt-4o")
+            assert isinstance(evaluator.backend, OpenAIBackend)
+            assert evaluator.backend.model_name == "gpt-4o"
+
+    def test_evaluate_success(self, mock_client):
+        """Test a successful evaluation with structured output."""
+        # Setup the mock response
+        mock_message = MagicMock()
+        mock_message.refusal = None
+        mock_message.parsed = EvaluationOutput(
+            score=0.9,
+            label="faithful",
+            confidence=1.0,
+            reasoning="The text accurately reflects the context."
+        )
+        
+        # Connect message to completion.choices[0]
+        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion.choices = [MagicMock(message=mock_message)]
+
+        # Initialize backend directly with injected client
+        backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
+        
+        result = backend.evaluate(EvaluationInput(
+            text="Paris is the capital.",
+            query="What is the capital?",
+            context="Paris is the capital of France."
+        ))
+
+        # Assertions
+        assert isinstance(result, EvaluationOutput)
+        assert result.score == 0.9
+        assert result.label == "faithful"
+        assert result.reasoning == "The text accurately reflects the context."
+        
+        # Verify call arguments
+        # We expect messages to be constructed from inputs
+        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        assert kwargs["model"] == "gpt-4o"
+        assert kwargs["response_format"] == EvaluationOutput
+        assert len(kwargs["messages"]) == 2 # System + User
+
+    def test_evaluate_refusal(self, mock_client):
+        """Test handling of model refusal."""
+        # Setup mock to simulate a refusal
+        mock_message = MagicMock()
+        mock_message.refusal = "I cannot evaluate this content due to safety policies."
+        mock_message.parsed = None
+        
+        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion.choices = [MagicMock(message=mock_message)]
+
+        backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
+        
+        # Expect ValueError (as implemented in backends/openai.py)
+        with pytest.raises(ValueError, match="Model refused to evaluate"):
+            backend.evaluate(EvaluationInput(text="Unsafe content"))

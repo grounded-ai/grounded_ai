@@ -1,8 +1,10 @@
 from typing import Any, Dict, Type, Union, Optional
+import json
+import re
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationInput, EvaluationOutput
+from ..schemas import EvaluationInput, EvaluationOutput, EvaluationError
 
 try:
     from transformers import pipeline
@@ -12,14 +14,20 @@ except ImportError:
 class HuggingFaceBackend(BaseEvaluator):
     """
     Generic backend for running standard HuggingFace models locally using `transformers`.
-    Does NOT enforce Grounded AI specific strict validation or prompts (unlike `grounded_ai_slm`).
+    Supports both 'text-generation' (LLMs) and 'text-classification' (BERT-style) pipelines.
     """
 
-    def __init__(self, model_id: str, device: str = None, task: str = "text-generation", **kwargs):
+    def __init__(self, model_id: str, device: str = None, task: str = None, **kwargs):
         if pipeline is None:
             raise ImportError("transformers package is not installed. Please install it via `pip install transformers`.")
         
         self.model_id = model_id.replace("hf/", "").replace("huggingface/", "")
+        
+        # Simple task heuristic if not provided
+        if not task:
+            task = "text-generation"
+            
+        self.task = task
         self.pipeline = pipeline(task, model=self.model_id, device=device, **kwargs)
 
     @property
@@ -30,34 +38,55 @@ class HuggingFaceBackend(BaseEvaluator):
     def output_schema(self) -> Type[BaseModel]:
         return EvaluationOutput
 
-    def evaluate(self, input_data: Union[EvaluationInput, Dict[str, Any]]) -> EvaluationOutput:
-        # Standardize Input
+    def evaluate(self, input_data: Union[EvaluationInput, Dict[str, Any]]) -> Union[EvaluationOutput, EvaluationError]:
         if isinstance(input_data, dict):
             input_data = EvaluationInput(**input_data)
 
-        # Simple Prompting (Generic)
-        user_content = f"Task: Evaluate the following content.\n"
-        if input_data.query:
-            user_content += f"Query: {input_data.query}\n"
-        if input_data.context:
-            user_content += f"Context: {input_data.context}\n"
-        if input_data.reference:
-            user_content += f"Reference: {input_data.reference}\n"
-        
-        user_content += f"Content to Evaluate: {input_data.text}\n"
-        user_content += "Provide a JSON response with 'score', 'label', 'confidence', 'reasoning'."
+        if self.task == "text-classification":
+            return self._evaluate_classification(input_data)
+        else:
+            return self._evaluate_generation(input_data)
 
-        # Run Generation
-        output = self.pipeline(user_content, max_new_tokens=200)
-        generated_text = output[0]["generated_text"]
+    def _evaluate_classification(self, input_data: EvaluationInput) -> EvaluationOutput:
+        """Handle BERT-style classification models."""
+        eval_text = input_data.text
+        if input_data.context:
+             eval_text = f"Context: {input_data.context}\nText: {input_data.text}"
+
+        results = self.pipeline(eval_text, top_k=1) 
+        top_result = results[0] if isinstance(results, list) else results
+
+        label = top_result.get("label", "unknown")
+        score = top_result.get("score", 0.0)
         
-        # Naive parsing for generic backend - real usage would likely require output parsers or specific prompting
-        # This is a stub implementation as agreed in design doc
-        
-        # Try to find JSON-like structure or just return dummy for now if unstructured
         return EvaluationOutput(
-            score=0.0, 
-            label="unknown", 
-            confidence=0.0, 
-            reasoning=f"Generic HF output: {generated_text[:50]}..."
+            score=score,
+            label=label,
+            confidence=score,
+            reasoning=f"Classified as {label} with score {score:.4f}"
+        )
+
+    def _evaluate_generation(self, input_data: EvaluationInput) -> EvaluationOutput:
+        """Handle Generative LLMs with simple text generation."""
+        
+        # Simple Prompt
+        prompt = f"""Task: Evaluate the following content.
+Query: {input_data.query or "N/A"}
+Context: {input_data.context or "N/A"}
+Reference: {input_data.reference or "N/A"}
+
+Content to Evaluate:
+{input_data.text}
+
+Evaluation:"""
+
+        # Generate
+        output = self.pipeline(prompt, max_new_tokens=100, return_full_text=False)
+        generated_text = output[0]["generated_text"].strip()
+        
+        return EvaluationOutput(
+            score=0.0,
+            label="generated_text",
+            confidence=0.0,
+            reasoning=generated_text
         )

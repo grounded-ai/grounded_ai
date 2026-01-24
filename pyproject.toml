@@ -35,11 +35,13 @@ classifiers = [
 dependencies = [
   "peft",
   "transformers",
-  "torch==2.8.0",
+  "torch==2.9.0",
   "accelerate",
   "flash-attn",
-  "bitsandbytes==0.47.0",
+  "bitsandbytes",
   "jinja2==3.1.6",
+  "openai>=1.66.2",
+  "anthropic>=0.76.0",
 ]
 
 [project.urls]

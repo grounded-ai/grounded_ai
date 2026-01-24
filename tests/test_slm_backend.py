@@ -3,15 +3,13 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 # Pre-mock dependencies before imports
-# We use a fixture or module-level patch, but for sys.modules logic it's safest to do it 
-# at the top level or via conftest. For this file, top level is fine to ensure clean load.
 sys.modules["peft"] = MagicMock()
 sys.modules["transformers"] = MagicMock()
 sys.modules["torch"] = MagicMock()
 
 from grounded_ai import Evaluator
 from grounded_ai.schemas import EvaluationInput, EvaluationOutput
-from grounded_ai.backends.grounded_ai_slm.backend import GroundedAISLMBackend
+from grounded_ai.backends.grounded_ai_slm.backend import GroundedAISLMBackend, EvalMode
 
 class TestSLMBackend:
     
@@ -43,13 +41,13 @@ class TestSLMBackend:
 
     def test_factory_routing(self, mock_deps):
         """Test that the factory routes 'grounded-ai/*' to SLM backend."""
-        evaluator = Evaluator("grounded-ai/hallucination-v1")
+        evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode=EvalMode.HALLUCINATION)
         assert isinstance(evaluator.backend, GroundedAISLMBackend)
-        assert evaluator.backend.task == "hallucination"
+        assert evaluator.backend.task == EvalMode.HALLUCINATION
 
     def test_hallucination_flow(self, mock_deps):
         """Test a full hallucination evaluation flow."""
-        evaluator = Evaluator("grounded-ai/hallucination-v1")
+        evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode=EvalMode.HALLUCINATION)
         
         result = evaluator.evaluate(
             text="London is the capital.", # This maps to RESPONSE in hallucination
@@ -69,8 +67,8 @@ class TestSLMBackend:
             {"role": "assistant", "content": "<rating>Toxic</rating><reasoning>Rude language.</reasoning>"}
         ]}]
 
-        evaluator = Evaluator("grounded-ai/toxic-judge-v1")
-        assert evaluator.backend.task == "toxicity"
+        evaluator = Evaluator("grounded-ai/toxic-judge-v1", eval_mode="TOXICITY")
+        assert evaluator.backend.task == EvalMode.TOXICITY
         
         result = evaluator.evaluate(text="You are stupid.")
         
@@ -84,8 +82,8 @@ class TestSLMBackend:
             {"role": "assistant", "content": "<rating>Relevant</rating><reasoning>Direct answer.</reasoning>"}
         ]}]
 
-        evaluator = Evaluator("grounded-ai/rag-relevance-v1")
-        assert evaluator.backend.task == "rag"
+        evaluator = Evaluator("grounded-ai/rag-relevance-v1", eval_mode=EvalMode.RAG_RELEVANCE)
+        assert evaluator.backend.task == EvalMode.RAG_RELEVANCE
         
         result = evaluator.evaluate(
             query="Question?",
