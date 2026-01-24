@@ -17,7 +17,7 @@ TODOs.md
 design.md
 .agent/
 .gemini/
-.DS_Store
+**/.DS_Store
 
 # Distribution
 build/
