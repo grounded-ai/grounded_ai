@@ -1,9 +1,9 @@
 import json
 import pytest
 from pydantic import ValidationError
-from grounded_ai.validators.toxic_data import ToxicityData
-from grounded_ai.validators.rag_data import RagData
-from grounded_ai.validators.hallucination_data import HallucinationData
+from grounded_ai.backends.grounded_ai_slm.validators.toxic_data import ToxicityData
+from grounded_ai.backends.grounded_ai_slm.validators.rag_data import RagData
+from grounded_ai.backends.grounded_ai_slm.validators.hallucination_data import HallucinationData
 
 
 class TestToxicityValidator:
