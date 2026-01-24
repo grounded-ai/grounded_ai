@@ -3,7 +3,7 @@ import os
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationInput, EvaluationOutput
+from ..schemas import EvaluationInput, EvaluationOutput, EvaluationError
 
 try:
     from openai import OpenAI
@@ -13,7 +13,6 @@ except ImportError:
 class OpenAIBackend(BaseEvaluator):
     """
     OpenAI backend using the Structured Outputs (beta.chat.completions.parse) implementation.
-    Requires openai>=1.40.0 roughly (versions supporting parse()).
     """
 
     def __init__(self, model_name: str, api_key: str = None, client: Optional[Any] = None, **kwargs):
@@ -32,13 +31,12 @@ class OpenAIBackend(BaseEvaluator):
     def output_schema(self) -> Type[BaseModel]:
         return EvaluationOutput
 
-    def evaluate(self, input_data: Union[EvaluationInput, Dict[str, Any]]) -> EvaluationOutput:
-        # Standardize Input (Standard behavior)
+    def evaluate(self, input_data: Union[EvaluationInput, Dict[str, Any]]) -> Union[EvaluationOutput, EvaluationError]:
+        # Standardize Input
         if isinstance(input_data, dict):
             input_data = EvaluationInput(**input_data)
 
         # Construct Prompt
-        # We can eventually make this template customizable in __init__
         system_prompt = "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
         
         user_content = f"Task: Evaluate the following content.\n"
@@ -56,21 +54,39 @@ class OpenAIBackend(BaseEvaluator):
             {"role": "user", "content": user_content}
         ]
 
-        # Call OpenAI with Structured Outputs
-        completion = self.client.beta.chat.completions.parse(
-            model=self.model_name,
-            messages=messages,
-            response_format=EvaluationOutput,
-            **self.kwargs
-        )
+        try:
+            # Call OpenAI with Structured Outputs
+            completion = self.client.beta.chat.completions.parse(
+                model=self.model_name,
+                messages=messages,
+                response_format=EvaluationOutput,
+                **self.kwargs
+            )
 
-        message = completion.choices[0].message
+            message = completion.choices[0].message
 
-        # Handle Refusals
-        if message.refusal:
-            # We treat refusal as a failed/unsafe evaluation, or return a specific error state.
-            # Design doc suggested RefusalError, but for now lets return a 'low confidence' output or raise.
-            # Lets raise, as it's cleaner for the caller to handle api-level rejections.
-            raise ValueError(f"Model refused to evaluate: {message.refusal}")
+            # Handle Refusals
+            if message.refusal:
+                return EvaluationError(
+                    error_code="MODEL_REFUSAL",
+                    message=message.refusal
+                )
 
-        return message.parsed
+            return message.parsed
+            
+        except Exception as e:
+            error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
+            error_msg = str(e)
+
+            # Try to extract cleaner message
+            if hasattr(e, "body") and isinstance(e.body, dict):
+                 if "error" in e.body and "message" in e.body["error"]:
+                     error_msg = e.body["error"]["message"]
+                 elif "message" in e.body:
+                     error_msg = e.body["message"]
+
+            return EvaluationError(
+                error_code=error_code,
+                message=error_msg,
+                details={"exception_type": type(e).__name__}
+            )
