@@ -54,7 +54,10 @@ class GroundedAISLMBackend(BaseEvaluator):
         super().__init__(input_schema=input_schema, output_schema=output_schema)
         self.model_id = model_id
         self.quantization = quantization
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if torch is not None:
+            self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = "cpu"
 
         if not eval_mode:
             raise ValueError(
