@@ -6,6 +6,7 @@ from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
 # Import backends lazily or generally
 # For now, we import locally within the factory to avoid heavy dependency loading if unused
 
+
 class Evaluator:
     """
     Main entry point for Grounded AI evaluation.
@@ -21,32 +22,42 @@ class Evaluator:
         """
         if model.startswith("grounded-ai/"):
             from .backends.grounded_ai_slm.backend import GroundedAISLMBackend
+
             return GroundedAISLMBackend(model_id=model, **kwargs)
-        
+
         elif model.startswith("openai/") or model.startswith("gpt-"):
             from .backends.openai import OpenAIBackend
+
             # Strip prefix if needed, or pass full string depending on implementation
             return OpenAIBackend(model_name=model.replace("openai/", ""), **kwargs)
-        
+
         elif model.startswith("anthropic/") or "claude" in model:
             from .backends.anthropic import AnthropicBackend
-            return AnthropicBackend(model_name=model.replace("anthropic/", ""), **kwargs)
-            
+
+            return AnthropicBackend(
+                model_name=model.replace("anthropic/", ""), **kwargs
+            )
+
         elif model.startswith("hf/") or model.startswith("huggingface/"):
             from .backends.huggingface import HuggingFaceBackend
+
             return HuggingFaceBackend(model_id=model, **kwargs)
-            
+
         else:
             # customizable fallback logic or raise error
-            raise ValueError(f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/'.")
+            raise ValueError(
+                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/'."
+            )
 
-    def evaluate(self, 
-                 input_data: Union[BaseModel, Dict[str, Any], str] = None,
-                 output_schema: Type[BaseModel] = None,
-                 **kwargs) -> Union[BaseModel, EvaluationError]:
+    def evaluate(
+        self,
+        input_data: Union[BaseModel, Dict[str, Any], str] = None,
+        output_schema: Type[BaseModel] = None,
+        **kwargs,
+    ) -> Union[BaseModel, EvaluationError]:
         """
         Main evaluation wrapper.
-        
+
         Args:
             input_data: Pydantic model, Dict, or string (interpreted as 'text' field).
             output_schema: Optional override for the output structure.
@@ -55,15 +66,16 @@ class Evaluator:
         # Handle 'text' passed as positional argument or direct string
         if isinstance(input_data, str):
             input_data = EvaluationInput(text=input_data, **kwargs)
-        
+
         # Handle kwargs-based construction if input_data is None
         elif input_data is None:
             # Check if 'text' is in kwargs (legacy/convenience support)
             if "text" in kwargs:
                 input_data = EvaluationInput(**kwargs)
             else:
-                 raise ValueError("Must provide 'input_data' object or 'text' argument.")
+                raise ValueError("Must provide 'input_data' object or 'text' argument.")
 
         return self.backend.evaluate(input_data, output_schema=output_schema)
+
 
 __all__ = ["Evaluator", "EvaluationInput", "EvaluationOutput", "EvaluationError"]
