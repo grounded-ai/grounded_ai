@@ -48,7 +48,14 @@ class GroundedAISLMBackend(BaseEvaluator):
             raise ValueError("eval_mode must be explicitly specified for GroundedAISLMBackend. "
                              "Options: 'TOXICITY', 'RAG_RELEVANCE', 'HALLUCINATION'.")
             
-        self.task = EvalMode(eval_mode)
+        # Robust enum conversion: handle string (case-insensitive) or Enum input
+        if isinstance(eval_mode, str):
+            try:
+                self.task = EvalMode(eval_mode.upper())
+            except ValueError:
+                 raise ValueError(f"Invalid eval_mode '{eval_mode}'. Options: {[e.value for e in EvalMode]}")
+        else:
+            self.task = EvalMode(eval_mode)
         self.prompt_template = self._get_template(self.task)
         
         self.tokenizer = None
