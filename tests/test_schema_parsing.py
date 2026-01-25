@@ -7,9 +7,9 @@ class TestSchemaParsing(unittest.TestCase):
     def test_default_input_templating(self):
         """Test that the default EvaluationInput templates correctly."""
         input_data = EvaluationInput(
-            text="This is a test submission.",
+            response="This is a test submission.",
             query="Is this a test?",
-            context="Testing context.",
+            conresponse="Testing context.",
             reference="Test reference."
         )
         
@@ -26,7 +26,7 @@ class TestSchemaParsing(unittest.TestCase):
 
     def test_partial_fields_templating(self):
         """Test templating when optional fields are None."""
-        input_data = EvaluationInput(text="Just text here.")
+        input_data = EvaluationInput(response="Just text here.")
         
         prompt = input_data.formatted_prompt
         
@@ -42,7 +42,7 @@ class TestSchemaParsing(unittest.TestCase):
         custom_tmpl = "STRICT FORMAT :: Q: {{ query }} -> A: {{ text }}"
         
         input_data = EvaluationInput(
-            text="My Answer",
+            response="My Answer",
             query="My Question",
             base_template=custom_tmpl
         )
@@ -64,7 +64,7 @@ class TestSchemaParsing(unittest.TestCase):
                 return f"Analyze Trace {self.trace_id}: {self.span_content}"
 
         trace_data = TraceInput(
-            text="Ignored base text", # Required by base but ignored in override
+            response="Ignored base text", # Required by base but ignored in override
             trace_id="0x1234",
             span_content="DB Query failed"
         )
@@ -76,7 +76,7 @@ class TestSchemaParsing(unittest.TestCase):
 
     def test_model_dump_includes_computed(self):
         """Ensure computed fields are included when dumping."""
-        input_data = EvaluationInput(text="Dump test")
+        input_data = EvaluationInput(response="Dump test")
         
         # model_dump() usually doesn't include computed fields by default in older v2
         # but usage in code might expect access via property. 
@@ -87,7 +87,7 @@ class TestSchemaParsing(unittest.TestCase):
         dump = input_data.model_dump()
         
         # Check standard fields
-        self.assertEqual(dump['text'], "Dump test")
+        self.assertEqual(dump['response'], "Dump test")
         
         # computed_field should appear in the dump
         self.assertIn('formatted_prompt', dump)

@@ -243,7 +243,7 @@ class TestValidatorEdgeCases:
         toxicity_data = [large_text]
         validated = ToxicityData(instances=toxicity_data)
         assert len(validated.instances) == 1
-        assert validated.instances[0].text == large_text
+        assert validated.instances[0].response == large_text
         
         # RAG validator - (query, context) format
         rag_data = [("Short query", large_text)]
@@ -263,8 +263,8 @@ class TestValidatorEdgeCases:
         # Toxicity validator
         toxicity_data = ["", "non-empty"]
         validated = ToxicityData(instances=toxicity_data)
-        assert validated.instances[0].text == ""
-        assert validated.instances[1].text == "non-empty"
+        assert validated.instances[0].response == ""
+        assert validated.instances[1].response == "non-empty"
         
         # RAG validator - (query, context) format
         rag_data = [("", ""), ("query", "context")]

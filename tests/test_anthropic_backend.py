@@ -32,7 +32,7 @@ class TestAnthropicBackend:
         """Test successful evaluation and verify schema patching logic."""
         # Setup mock response
         mock_content = MagicMock()
-        mock_content.text = json.dumps({
+        mock_content.response = json.dumps({
             "score": 0.85,
             "label": "faithful",
             "confidence": 0.9,
@@ -44,9 +44,9 @@ class TestAnthropicBackend:
         backend = AnthropicBackend(model_name="claude-3", client=mock_client)
         
         result = backend.evaluate(EvaluationInput(
-            text="Paris is capital.",
+            response="Paris is capital.",
             query="Capital?",
-            context="Paris is capital of France."
+            conresponse="Paris is capital of France."
         ))
 
         # 1. Assert Result
@@ -90,7 +90,7 @@ class TestAnthropicBackend:
 
         backend = AnthropicBackend(model_name="claude-3", client=mock_client)
         
-        result = backend.evaluate(EvaluationInput(text="fail"))
+        result = backend.evaluate(EvaluationInput(response="fail"))
         
         assert isinstance(result, EvaluationError)
         assert result.error_code == "402"

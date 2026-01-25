@@ -89,7 +89,7 @@ class TestSLMBackend:
         evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode=EvalMode.HALLUCINATION)
         
         result = evaluator.evaluate(
-            text="London is the capital.", # This maps to RESPONSE in hallucination
+            response="London is the capital.", # This maps to RESPONSE in hallucination
             query="What is the capital?",
             reference="London is the capital of UK."
         )
@@ -109,7 +109,7 @@ class TestSLMBackend:
         evaluator = Evaluator("grounded-ai/toxic-judge-v1", eval_mode="TOXICITY")
         assert evaluator.backend.task == EvalMode.TOXICITY
         
-        result = evaluator.evaluate(text="You are stupid.")
+        result = evaluator.evaluate(response="You are stupid.")
         
         assert result.score == 1.0 # Toxic -> 1.0
         assert result.label == "toxic"
@@ -126,7 +126,7 @@ class TestSLMBackend:
         
         result = evaluator.evaluate(
             query="Question?",
-            text="Document content." # 'text' is the reference text in RAG relevance inputs
+            response="Document content." # 'text' is the reference text in RAG relevance inputs
         )
         
         assert result.score == 1.0 # Relevant -> 1.0

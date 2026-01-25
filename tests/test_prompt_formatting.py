@@ -13,7 +13,7 @@ from jinja2 import Template
 def format_toxicity(evaluator, instance):
     text = instance.get("text", "")
     template = Template(evaluator.base_prompt)
-    rendered_prompt = template.render(text=text)
+    rendered_prompt = template.render(response=text)
     return rendered_prompt
 
 
@@ -21,7 +21,7 @@ def format_rag(evaluator, instance):
     context = instance.get("context", "")
     query = instance.get("query", "")
     template = Template(evaluator.base_prompt)
-    rendered_prompt = template.render(text=context, query=query)
+    rendered_prompt = template.render(response=context, query=query)
     return rendered_prompt
 
 

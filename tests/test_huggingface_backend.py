@@ -28,9 +28,9 @@ class TestHuggingFaceBackend:
 
         # Run a simple evaluation
         result = evaluator.evaluate(
-            text="The sky is blue.",
+            response="The sky is blue.",
             query="What color is the sky?",
-            context="The sky appears blue to the human eye."
+            conresponse="The sky appears blue to the human eye."
         )
 
         # Basic assertions on the output

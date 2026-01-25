@@ -53,9 +53,9 @@ class TestOpenAIBackend:
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
         
         result = backend.evaluate(EvaluationInput(
-            text="Paris is the capital.",
+            response="Paris is the capital.",
             query="What is the capital?",
-            context="Paris is the capital of France."
+            conresponse="Paris is the capital of France."
         ))
 
         # Assertions
@@ -84,7 +84,7 @@ class TestOpenAIBackend:
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
         
         # Expect EvaluationError (backend returns error object, doesn't raise)
-        result = backend.evaluate(EvaluationInput(text="Unsafe content"))
+        result = backend.evaluate(EvaluationInput(response="Unsafe content"))
         
         assert isinstance(result, EvaluationError)
         assert result.error_code == "MODEL_REFUSAL"
