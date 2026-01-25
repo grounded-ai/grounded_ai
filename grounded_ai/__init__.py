@@ -59,21 +59,17 @@ class Evaluator:
         Main evaluation wrapper.
 
         Args:
-            input_data: Pydantic model, Dict, or string (interpreted as 'text' field).
+            input_data: Pydantic model, Dict, or string (interpreted as 'response' field).
             output_schema: Optional override for the output structure.
             **kwargs: If input_data is not provided, kwargs are used to construct EvaluationInput.
         """
-        # Handle 'text' passed as positional argument or direct string
+        # Handle string passed as positional argument or direct string
         if isinstance(input_data, str):
-            input_data = EvaluationInput(text=input_data, **kwargs)
+            input_data = EvaluationInput(response=input_data, **kwargs)
 
         # Handle kwargs-based construction if input_data is None
         elif input_data is None:
-            # Check if 'text' is in kwargs (legacy/convenience support)
-            if "text" in kwargs:
-                input_data = EvaluationInput(**kwargs)
-            else:
-                raise ValueError("Must provide 'input_data' object or 'text' argument.")
+            input_data = EvaluationInput(**kwargs)
 
         return self.backend.evaluate(input_data, output_schema=output_schema)
 

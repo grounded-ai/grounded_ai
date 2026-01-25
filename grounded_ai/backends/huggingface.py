@@ -52,9 +52,9 @@ class HuggingFaceBackend(BaseEvaluator):
         self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None
     ) -> BaseModel:
         """Handle BERT-style classification models."""
-        eval_text = input_data.text
+        eval_text = input_data.response
         if input_data.context:
-            eval_text = f"Context: {input_data.context}\nText: {input_data.text}"
+            eval_text = f"Context: {input_data.context}\nText: {eval_text}"
 
         results = self.pipeline(eval_text, top_k=1)
         top_result = results[0] if isinstance(results, list) else results
@@ -78,7 +78,7 @@ class HuggingFaceBackend(BaseEvaluator):
         if hasattr(input_data, "formatted_prompt"):
             prompt = input_data.formatted_prompt
         else:
-            prompt = f"Evaluate: {input_data.text}"
+            prompt = f"Evaluate: {input_data.response}"
 
         # Generate
         output = self.pipeline(prompt, max_new_tokens=100, return_full_text=False)

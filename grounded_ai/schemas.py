@@ -6,12 +6,17 @@ from pydantic import BaseModel, Field, computed_field
 
 
 class EvaluationInput(BaseModel):
-    """Standard input for Grounded AI evaluators with auto-templating."""
-
-    text: str
+    """
+    Standard input for Grounded AI evaluators.
+    
+    Fields:
+    - response: The primary text content to evaluate (e.g. LLM output, Retrieved Doc, or generic text).
+    - query: The user's original question or prompt.
+    - context: Background information, ground truth, or knowledge base.
+    """
+    response: str
     query: Optional[str] = None
     context: Optional[str] = None
-    reference: Optional[str] = None
 
     # Powerful default Jinja2 template handling logic
     base_template: str = """

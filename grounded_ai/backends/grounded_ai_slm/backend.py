@@ -164,25 +164,22 @@ class GroundedAISLMBackend(BaseEvaluator):
         template = Template(self.prompt_template)
 
         if self.task == EvalMode.TOXICITY:
-            # Toxicity expects 'text'
-            return template.render(text=input_model.text)
+            # Toxicity Base expects 'text'
+            return template.render(text=input_model.response)
 
         elif self.task == EvalMode.RAG_RELEVANCE:
-            # Rag expects 'query' (Question) and 'text' (Reference Document)
-            document_text = (
-                input_model.context if input_model.context else input_model.text
-            )
-            return template.render(text=document_text, query=input_model.query)
+            # RAG Base expects 'text' (the doc) and 'query'
+            return template.render(text=input_model.response, query=input_model.query)
 
         elif self.task == EvalMode.HALLUCINATION:
-            # Hallucination expects: query, response, reference
+            # Hallucination expects 'response', 'query', 'reference'
             return template.render(
-                response=input_model.text,
+                response=input_model.response,
                 query=input_model.query,
-                reference=input_model.reference or input_model.context or "",
+                reference=input_model.context or "",
             )
 
-        return input_model.text
+        return input_model.response
 
     def _parse_output(
         self, raw_response: str, output_schema: Type[BaseModel] = None
