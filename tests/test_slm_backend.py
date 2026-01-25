@@ -3,16 +3,55 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 # Pre-mock dependencies before imports
-sys.modules["peft"] = MagicMock()
-sys.modules["transformers"] = MagicMock()
-sys.modules["torch"] = MagicMock()
+import sys
+import pytest
+from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from grounded_ai.backends.grounded_ai_slm.backend import GroundedAISLMBackend, EvalMode
+else:
+    # We will import these dynamically in the fixture to allow mocking imports
+    GroundedAISLMBackend = None
+    EvalMode = None
 
 from grounded_ai import Evaluator
 from grounded_ai.schemas import EvaluationInput, EvaluationOutput
-from grounded_ai.backends.grounded_ai_slm.backend import GroundedAISLMBackend, EvalMode
 
 class TestSLMBackend:
     
+    @pytest.fixture(autouse=True)
+    def mock_imports(self):
+        """
+        Safely mock heavy dependencies (torch, transformers, peft) for this test module only.
+        This prevents polluting sys.modules for other integration tests.
+        """
+        mock_modules = {
+            "torch": MagicMock(),
+            "transformers": MagicMock(),
+            "peft": MagicMock(),
+        }
+        
+        # If the backend was already imported (e.g. by another test), we force a reload
+        if "grounded_ai.backends.grounded_ai_slm.backend" in sys.modules:
+            del sys.modules["grounded_ai.backends.grounded_ai_slm.backend"]
+
+        with patch.dict(sys.modules, mock_modules):
+            # Now safe to import
+            from grounded_ai.backends.grounded_ai_slm.backend import GroundedAISLMBackend as GB, EvalMode as EM
+            
+            # Inject into global namespace for tests to use (or attach to self/fixture)
+            global GroundedAISLMBackend, EvalMode
+            GroundedAISLMBackend = GB
+            EvalMode = EM
+            
+            yield
+            
+        # Cleanup: we rely on patch.dict to restore sys.modules, but we might need to purge our tainted backend module
+        if "grounded_ai.backends.grounded_ai_slm.backend" in sys.modules:
+            del sys.modules["grounded_ai.backends.grounded_ai_slm.backend"]
+
+
     @pytest.fixture
     def mock_deps(self):
         """Fixture to patch the internal backend imports/calls if needed again."""
@@ -41,7 +80,7 @@ class TestSLMBackend:
 
     def test_factory_routing(self, mock_deps):
         """Test that the factory routes 'grounded-ai/*' to SLM backend."""
-        evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode=EvalMode.HALLUCINATION)
+        evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode="hallucination")
         assert isinstance(evaluator.backend, GroundedAISLMBackend)
         assert evaluator.backend.task == EvalMode.HALLUCINATION
 

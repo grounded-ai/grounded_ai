@@ -7,7 +7,7 @@ mock_openai_module = MagicMock()
 sys.modules["openai"] = mock_openai_module
 
 from grounded_ai import Evaluator
-from grounded_ai.schemas import EvaluationInput, EvaluationOutput
+from grounded_ai.schemas import EvaluationInput, EvaluationOutput, EvaluationError
 from grounded_ai.backends.openai import OpenAIBackend
 
 class TestOpenAIBackend:
@@ -83,6 +83,9 @@ class TestOpenAIBackend:
 
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
         
-        # Expect ValueError (as implemented in backends/openai.py)
-        with pytest.raises(ValueError, match="Model refused to evaluate"):
-            backend.evaluate(EvaluationInput(text="Unsafe content"))
+        # Expect EvaluationError (backend returns error object, doesn't raise)
+        result = backend.evaluate(EvaluationInput(text="Unsafe content"))
+        
+        assert isinstance(result, EvaluationError)
+        assert result.error_code == "MODEL_REFUSAL"
+        assert "policies" in result.message or "refused" in result.message
