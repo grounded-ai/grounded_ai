@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from jinja2 import Template
 from pydantic import BaseModel, Field, computed_field
 
 # --- Standard Evaluation Schemas ---
@@ -6,32 +7,38 @@ from pydantic import BaseModel, Field, computed_field
 class EvaluationInput(BaseModel):
     """Standard input for Grounded AI evaluators with auto-templating."""
     text: str
+    query: Optional[str] = None
     context: Optional[str] = None
     reference: Optional[str] = None
-    query: Optional[str] = None
     
-    base_template: str = (
-        "Task: Evaluate the following content.\n"
-        "Query: {query}\n"
-        "Context: {context}\n"
-        "Reference: {reference}\n"
-        "\n"
-        "Content to Evaluate:\n"
-        "{text}"
-    )
+    # Powerful default Jinja2 template handling logic
+    base_template: str = """
+        Task: Evaluate the following content.
+
+        {%- if query %}
+        Query: {{ query }}
+        {%- endif %}
+        {%- if context %}
+        Context: {{ context }}
+        {%- endif %}
+        {%- if reference %}
+        Reference: {{ reference }}
+        {%- endif %}
+
+        Content to Evaluate:
+        {{ text }}
+    """
 
     @computed_field
     @property
     def formatted_prompt(self) -> str:
-        """Auto-formats prompt using fields."""
-        # Simple string formatting. 
-        # Note: None values will render as 'None'. 
-        return self.base_template.format(
-            text=self.text,
-            query=self.query,
-            context=self.context,
-            reference=self.reference
-        )
+        """
+        Auto-formats prompt using fields.
+        Renders the base_template (default or overridden) using Jinja2.
+        """
+        # Pass fields to Jinja, explicit exclusion prevents recursion loop
+        data = self.model_dump(exclude={'formatted_prompt'})
+        return Template(self.base_template).render(**data)
 
 class EvaluationOutput(BaseModel):
     """Standard output for Grounded AI evaluators."""
