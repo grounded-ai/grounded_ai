@@ -24,9 +24,9 @@ class TestAnthropicBackend:
     def test_factory_routing(self):
         """Test that 'anthropic/*' routes correctly."""
         with patch("grounded_ai.backends.anthropic.Anthropic") as MockAnthropic:
-            evaluator = Evaluator("anthropic/claude-3-5-sonnet")
+            evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
             assert isinstance(evaluator.backend, AnthropicBackend)
-            assert evaluator.backend.model_name == "claude-3-5-sonnet"
+            assert evaluator.backend.model_name == "claude-haiku-4-5-20251001"
 
     def test_evaluate_success_and_schema_patching(self, mock_client):
         """Test successful evaluation and verify schema patching logic."""

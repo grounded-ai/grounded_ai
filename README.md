@@ -19,7 +19,7 @@ We standardize the **Inputs** (Text, Query, Context) and **Outputs** (Score, Lab
 | :--- | :--- | :--- |
 | **Grounded AI SLM** | ✅ **Production** | Our specialized local models for Hallucination, Toxicity, and RAG Relevance. |
 | **OpenAI** | ✅ **Production** | Uses `gpt-4o`/`mini` with strict Structured Outputs (`parse`). |
-| **Anthropic** | ✅ **Production** | Uses `claude-3-5` with Beta Structured Outputs (JSON Schema). |
+| **Anthropic** | ✅ **Production** | Uses `claude-haiku-4-5` with Beta Structured Outputs (JSON Schema). |
 | **HuggingFace** | 🚧 **Beta** | Run any generic HF model locally (naive implementation). |
 | **Integrations** | 🏗️ **Planned** | LangSmith Tracing, OpenTelemetry, AWS Bedrock. |
 
@@ -62,10 +62,7 @@ print(result)
 import os
 os.environ["OPENAI_API_KEY"] = "sk-..."
 
-evaluator = Evaluator(
-    "openai/gpt-4o",
-    eval_mode="HALLUCINATION" # Optional hint for customized prompting
-)
+evaluator = Evaluator("openai/gpt-4o")
 
 result = evaluator.evaluate(
     text="The moon is made of cheese.",
@@ -73,15 +70,51 @@ result = evaluator.evaluate(
 )
 ```
 
-### 3. Using Anthropic (Claude 3.5)
+### 3. Using Anthropic (Claude)
 
 ```python
 import os
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
 
-evaluator = Evaluator("anthropic/claude-3-5-sonnet-20241022")
+evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
 
 result = evaluator.evaluate(text="This content is safe.")
+```
+
+### 4. Custom Templating (New!)
+
+You can completely customize how your inputs are presented to the model using Jinja2 templates directly in the input schema.
+
+```python
+from grounded_ai import Evaluator, EvaluationInput
+
+evaluator = Evaluator("openai/gpt-4o")
+
+# Define a custom template (Jinja2 supported)
+custom_template = """
+SYSTEM: You are a strict code reviewer.
+CODE: {{ text }}
+
+{% if context %}
+CONTEXT: {{ context }}
+{% endif %}
+
+Evaluate the code quality.
+"""
+
+input_data = EvaluationInput(
+    text="def foo(): pass",
+    context="Python coding standards",
+    base_template=custom_template
+)
+
+# prompt sent: 
+# SYSTEM: You are a strict code reviewer.
+# CODE: def foo(): pass
+# CONTEXT: Python coding standards
+# Evaluate the code quality.
+
+result = evaluator.evaluate(input_data)
 ```
 
 ## API Reference
