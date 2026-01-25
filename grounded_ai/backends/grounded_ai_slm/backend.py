@@ -82,13 +82,12 @@ class GroundedAISLMBackend(BaseEvaluator):
         self._load_model()
 
     def _get_template(self, task: EvalMode) -> str:
-        if task == EvalMode.HALLUCINATION:
-            return HALLUCINATION_EVAL_BASE
-        elif task == EvalMode.RAG_RELEVANCE:
-            return RAG_RELEVANCE_EVAL_BASE
-        elif task == EvalMode.TOXICITY:
-            return TOXICITY_EVAL_BASE
-        return ""
+        prompt_map = {
+            EvalMode.HALLUCINATION: HALLUCINATION_EVAL_BASE,
+            EvalMode.RAG_RELEVANCE: RAG_RELEVANCE_EVAL_BASE,
+            EvalMode.TOXICITY: TOXICITY_EVAL_BASE,
+        }
+        return prompt_map.get(task, "")
 
     def _load_model(self):
         """Loads and merges the model."""
