@@ -38,7 +38,8 @@ class GroundedAISLMBackend(BaseEvaluator):
     Enforces strict internal validation using custom Pydantic models.
     """
 
-    def __init__(self, model_id: str, device: str = None, quantization: bool = False, eval_mode: Optional[Union[EvalMode, str]] = None):
+    def __init__(self, model_id: str, device: str = None, quantization: bool = False, eval_mode: Optional[Union[EvalMode, str]] = None, input_schema: Type[BaseModel] = None, output_schema: Type[BaseModel] = None):
+        super().__init__(input_schema=input_schema, output_schema=output_schema)
         self.model_id = model_id
         self.quantization = quantization
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -104,19 +105,8 @@ class GroundedAISLMBackend(BaseEvaluator):
             tokenizer=self.tokenizer
         )
 
-    @property
-    def input_schema(self) -> Type[BaseModel]:
-        return EvaluationInput
 
-    @property
-    def output_schema(self) -> Type[BaseModel]:
-        return EvaluationOutput
-
-    def evaluate(self, input_data: Union[EvaluationInput, Dict[str, Any]]) -> EvaluationOutput:
-        # 1. Standardize Input
-        if isinstance(input_data, dict):
-            input_data = EvaluationInput(**input_data)
-        
+    def _call_backend(self, input_data: BaseModel, output_schema: Type[BaseModel]) -> BaseModel:
         # 2. Strict Internal Validation (The "Grounded AI" Special Sauce)
         self._validate_strictly(input_data)
         
@@ -140,7 +130,7 @@ class GroundedAISLMBackend(BaseEvaluator):
         raw_output = outputs[0]["generated_text"][-1]["content"].strip()
 
         # 5. Parse Output
-        return self._parse_output(raw_output)
+        return self._parse_output(raw_output, output_schema)
 
     def _validate_strictly(self, input_data: EvaluationInput):
         """Converts universal input to strict internal schema to ensure safety."""
@@ -169,7 +159,7 @@ class GroundedAISLMBackend(BaseEvaluator):
             
         return input_model.text
 
-    def _parse_output(self, raw_response: str) -> EvaluationOutput:
+    def _parse_output(self, raw_response: str, output_schema: Type[BaseModel] = None) -> BaseModel:
         rating_match = re.search(r"<rating>(.*?)</rating>", raw_response)
         reasoning_match = re.search(r"<reasoning>(.*?)</reasoning>", raw_response, re.DOTALL)
         
@@ -201,7 +191,7 @@ class GroundedAISLMBackend(BaseEvaluator):
                 score = 1.0
                 label = "hallucination"
                 
-        return EvaluationOutput(
+        return output_schema(
             score=score,
             label=label,
             confidence=1.0, 
