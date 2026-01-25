@@ -29,15 +29,12 @@ class OpenAIBackend(BaseEvaluator):
         # Construct Prompt
         system_prompt = "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
         
-        user_content = f"Task: Evaluate the following content.\n"
-        if getattr(input_data, 'query', None):
-            user_content += f"Query: {input_data.query}\n"
-        if getattr(input_data, 'context', None):
-            user_content += f"Context: {input_data.context}\n"
-        if getattr(input_data, 'reference', None):
-            user_content += f"Reference: {input_data.reference}\n"
-        
-        user_content += f"Content to Evaluate: {input_data.text}"
+        # Use the input model's own formatting logic (or default template)
+        if hasattr(input_data, 'formatted_prompt'):
+            user_content = input_data.formatted_prompt
+        else:
+             # Fallback for models without formatted_prompt
+            user_content = str(input_data.model_dump())
 
         messages = [
             {"role": "system", "content": system_prompt},

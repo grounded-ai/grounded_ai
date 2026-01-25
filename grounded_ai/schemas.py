@@ -1,14 +1,37 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # --- Standard Evaluation Schemas ---
 
 class EvaluationInput(BaseModel):
-    """Standard input for Grounded AI evaluators."""
+    """Standard input for Grounded AI evaluators with auto-templating."""
     text: str
     context: Optional[str] = None
     reference: Optional[str] = None
     query: Optional[str] = None
+    
+    base_template: str = (
+        "Task: Evaluate the following content.\n"
+        "Query: {query}\n"
+        "Context: {context}\n"
+        "Reference: {reference}\n"
+        "\n"
+        "Content to Evaluate:\n"
+        "{text}"
+    )
+
+    @computed_field
+    @property
+    def formatted_prompt(self) -> str:
+        """Auto-formats prompt using fields."""
+        # Simple string formatting. 
+        # Note: None values will render as 'None'. 
+        return self.base_template.format(
+            text=self.text,
+            query=self.query,
+            context=self.context,
+            reference=self.reference
+        )
 
 class EvaluationOutput(BaseModel):
     """Standard output for Grounded AI evaluators."""

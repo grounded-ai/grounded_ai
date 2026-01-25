@@ -61,15 +61,10 @@ class HuggingFaceBackend(BaseEvaluator):
         """Handle Generative LLMs with simple text generation."""
         
         # Simple Prompt
-        prompt = f"""Task: Evaluate the following content.
-Query: {input_data.query or "N/A"}
-Context: {input_data.context or "N/A"}
-Reference: {input_data.reference or "N/A"}
-
-Content to Evaluate:
-{input_data.text}
-
-Evaluation:"""
+        if hasattr(input_data, 'formatted_prompt'):
+            prompt = input_data.formatted_prompt
+        else:
+            prompt = f"Evaluate: {input_data.text}"
 
         # Generate
         output = self.pipeline(prompt, max_new_tokens=100, return_full_text=False)
