@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 from functools import wraps
 from typing import List, Optional, Tuple, Union
 
@@ -8,7 +7,6 @@ from jinja2 import Template
 from tqdm import tqdm
 
 from .validators.hallucination_data import HallucinationData
-from .validators.query_response_data import HallucinationData as QueryResponseData # Optional if needed
 from .validators.rag_data import RagData
 from .validators.toxic_data import ToxicityData
 from .validators.output_data import OutputInstance
@@ -277,6 +275,7 @@ def format_hallucination(evaluator, instance):
         reference=reference, query=query, response=response
     )
     return rendered_prompt
+
 
 def format_system(system):
     # template = Template(system)

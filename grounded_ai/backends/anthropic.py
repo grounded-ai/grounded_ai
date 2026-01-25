@@ -1,45 +1,59 @@
-from typing import Any, Dict, Type, Union, Optional
+from typing import Any, Type, Union, Optional
 import os
 import json
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationInput, EvaluationOutput, EvaluationError
+from ..schemas import EvaluationError
 
 try:
     from anthropic import Anthropic
 except ImportError:
     Anthropic = None
 
+
 class AnthropicBackend(BaseEvaluator):
     """
     Anthropic backend using the 'structured-outputs' beta feature.
     """
 
-    def __init__(self, model_name: str, api_key: str = None, client: Optional[Any] = None, input_schema: Type[BaseModel] = None, output_schema: Type[BaseModel] = None, **kwargs):
+    def __init__(
+        self,
+        model_name: str,
+        api_key: str = None,
+        client: Optional[Any] = None,
+        input_schema: Type[BaseModel] = None,
+        output_schema: Type[BaseModel] = None,
+        **kwargs,
+    ):
         super().__init__(input_schema=input_schema, output_schema=output_schema)
         if Anthropic is None:
-            raise ImportError("anthropic package is not installed. Please install it via `pip install anthropic`.")
-        
+            raise ImportError(
+                "anthropic package is not installed. Please install it via `pip install anthropic`."
+            )
+
         self.model_name = model_name
-        self.client = client or Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        self.client = client or Anthropic(
+            api_key=api_key or os.getenv("ANTHROPIC_API_KEY")
+        )
         self.kwargs = kwargs
 
-
-    def _call_backend(self, input_data: BaseModel, output_schema: Type[BaseModel]) -> Union[BaseModel, EvaluationError]:
+    def _call_backend(
+        self, input_data: BaseModel, output_schema: Type[BaseModel]
+    ) -> Union[BaseModel, EvaluationError]:
         # Construct Prompt
         system_prompt = "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
-        
+
         # Use the input model's own formatting logic (or default template)
-        if hasattr(input_data, 'formatted_prompt'):
+        if hasattr(input_data, "formatted_prompt"):
             user_content = input_data.formatted_prompt
         else:
-             # Fallback for models without formatted_prompt
+            # Fallback for models without formatted_prompt
             user_content = str(input_data.model_dump())
 
         # Pydantic's model_json_schema() generates a compliant JSON schema but Anthropic needs additionalProperties=False
         json_schema = output_schema.model_json_schema()
-        
+
         # Strip title to reduce tokens and noise if desired, but mainly enforce strictness
         if "title" in json_schema:
             del json_schema["title"]
@@ -47,10 +61,16 @@ class AnthropicBackend(BaseEvaluator):
         def _enforce_strict_schema(schema):
             if isinstance(schema, dict):
                 # Remove unsuported validation keywords
-                for key in ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "title"]:
+                for key in [
+                    "minimum",
+                    "maximum",
+                    "exclusiveMinimum",
+                    "exclusiveMaximum",
+                    "title",
+                ]:
                     if key in schema:
                         del schema[key]
-                
+
                 if schema.get("type") == "object":
                     schema["additionalProperties"] = False
                     if "properties" in schema:
@@ -59,22 +79,17 @@ class AnthropicBackend(BaseEvaluator):
             return schema
 
         json_schema = _enforce_strict_schema(json_schema)
-        
+
         try:
             # Use Beta Structured Outputs
             response = self.client.beta.messages.create(
                 model=self.model_name,
                 max_tokens=1024,
                 system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_content}
-                ],
+                messages=[{"role": "user", "content": user_content}],
                 betas=["structured-outputs-2025-11-13"],
-                output_format={
-                    "type": "json_schema",
-                    "schema": json_schema
-                },
-                **self.kwargs
+                output_format={"type": "json_schema", "schema": json_schema},
+                **self.kwargs,
             )
 
             # Response is raw string in content[0].text which we parse
@@ -86,15 +101,15 @@ class AnthropicBackend(BaseEvaluator):
             # Catch API errors
             error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
             error_msg = str(e)
-            
+
             if hasattr(e, "body") and isinstance(e.body, dict):
-                 if "error" in e.body and "message" in e.body["error"]:
-                     error_msg = e.body["error"]["message"]
-                 elif "message" in e.body:
-                     error_msg = e.body["message"]
-            
+                if "error" in e.body and "message" in e.body["error"]:
+                    error_msg = e.body["error"]["message"]
+                elif "message" in e.body:
+                    error_msg = e.body["message"]
+
             return EvaluationError(
-                error_code=error_code, 
+                error_code=error_code,
                 message=error_msg,
-                details={"exception_type": type(e).__name__}
+                details={"exception_type": type(e).__name__},
             )

@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator, computed_field
+from pydantic import BaseModel, computed_field
 import re
+
 
 def extract_rating(response: str) -> Optional[int]:
     """
@@ -34,14 +35,15 @@ def extract_reasoning(response: str) -> Optional[str]:
         return match.group(1).strip()
     return None
 
+
 class OutputInstance(BaseModel):
     raw_response: str
-    
+
     @computed_field
     @property
     def rating(self) -> str:
         return extract_rating(self.raw_response)
-    
+
     @computed_field
     @property
     def reasoning(self) -> Optional[str]:
