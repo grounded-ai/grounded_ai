@@ -1,4 +1,5 @@
 from typing import Optional, Type, Union, Any, Dict
+from pydantic import BaseModel
 
 from .base import BaseEvaluator
 from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
@@ -40,27 +41,29 @@ class Evaluator:
             raise ValueError(f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/'.")
 
     def evaluate(self, 
-                 text: str, 
-                 context: Optional[str] = None, 
-                 query: Optional[str] = None, 
-                 reference: Optional[str] = None,
-                 **kwargs) -> Union[EvaluationOutput, EvaluationError]:
+                 input_data: Union[BaseModel, Dict[str, Any], str] = None,
+                 output_schema: Type[BaseModel] = None,
+                 **kwargs) -> Union[BaseModel, EvaluationError]:
         """
         Main evaluation wrapper.
-        Constructs the EvaluationInput and passes it to the backend.
         
         Args:
-            text: The main text content to evaluate (response, doc, etc.)
-            context: Additional context
-            query: The user query
-            reference: Ground truth or knowledge base reference
+            input_data: Pydantic model, Dict, or string (interpreted as 'text' field).
+            output_schema: Optional override for the output structure.
+            **kwargs: If input_data is not provided, kwargs are used to construct EvaluationInput.
         """
-        input_data = EvaluationInput(
-            text=text,
-            context=context,
-            query=query,
-            reference=reference
-        )
-        return self.backend.evaluate(input_data)
+        # Handle 'text' passed as positional argument or direct string
+        if isinstance(input_data, str):
+            input_data = EvaluationInput(text=input_data, **kwargs)
+        
+        # Handle kwargs-based construction if input_data is None
+        elif input_data is None:
+            # Check if 'text' is in kwargs (legacy/convenience support)
+            if "text" in kwargs:
+                input_data = EvaluationInput(**kwargs)
+            else:
+                 raise ValueError("Must provide 'input_data' object or 'text' argument.")
+
+        return self.backend.evaluate(input_data, output_schema=output_schema)
 
 __all__ = ["Evaluator", "EvaluationInput", "EvaluationOutput", "EvaluationError"]
