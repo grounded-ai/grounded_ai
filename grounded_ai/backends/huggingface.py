@@ -59,15 +59,12 @@ class HuggingFaceBackend(BaseEvaluator):
         **kwargs,
     ) -> BaseModel:
         """Handle BERT-style classification models."""
-        eval_text = input_data.response
-        if input_data.context:
-            eval_text = f"Context: {input_data.context}\nText: {eval_text}"
+        if hasattr(input_data, "formatted_prompt"):
+            eval_text = input_data.formatted_prompt
+        else:
+            eval_text = str(input_data.model_dump())
 
-        # Merge defaults with kwargs
-        # Default top_k=1
-        call_kwargs = {"top_k": 1, **kwargs}
-
-        results = self.pipeline(eval_text, **call_kwargs)
+        results = self.pipeline(eval_text, **kwargs)
         top_result = results[0] if isinstance(results, list) else results
 
         label = top_result.get("label", "unknown")
@@ -89,16 +86,20 @@ class HuggingFaceBackend(BaseEvaluator):
         """Handle Generative LLMs using chat-style messaging."""
 
         messages = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
+        # Construct System Prompt
+        system_prompt = (
+            self.system_prompt
+            or "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
+        )
+        
+        # Some chat templates don't support system prompts, but standard chat models usually do.
+        messages.append({"role": "system", "content": system_prompt})
 
         # User Content
         if hasattr(input_data, "formatted_prompt"):
             user_content = input_data.formatted_prompt
-        elif hasattr(input_data, "response"):
-            user_content = f"Evaluate: {input_data.response}"
         else:
-            # Fallback for custom models
+            # Fallback for models without formatted_prompt
             user_content = str(input_data.model_dump())
 
         messages.append({"role": "user", "content": user_content})
