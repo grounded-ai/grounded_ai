@@ -86,7 +86,7 @@ class AnthropicBackend(BaseEvaluator):
             return schema
 
         json_schema = _enforce_strict_schema(json_schema)
-
+        
         # Merge init kwargs with runtime kwargs (runtime overrides init)
         request_kwargs = {**self.kwargs, **kwargs}
 
@@ -94,7 +94,6 @@ class AnthropicBackend(BaseEvaluator):
             # Use Beta Structured Outputs
             response = self.client.beta.messages.create(
                 model=self.model_name,
-                max_tokens=1024,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
                 betas=["structured-outputs-2025-11-13"],
