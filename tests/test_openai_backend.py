@@ -150,3 +150,20 @@ class TestOpenAIBackend:
         # OpenAI backend calls .model_dump() on custom inputs if they lack formatted_prompt
         messages = kwargs["messages"]
         assert str(input_data.model_dump()) in messages[1]["content"]
+
+    def test_kwargs_passthrough(self, mock_client):
+        """Test that kwargs (e.g. temperature) are passed to the API."""
+        mock_message = MagicMock()
+        mock_message.refusal = None
+        mock_message.parsed = EvaluationOutput(score=0.5, label="ok", confidence=1.0, reasoning="ok")
+        
+        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion.choices = [MagicMock(message=mock_message)]
+
+        backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
+        
+        # Override temperature in evaluate call
+        backend.evaluate(EvaluationInput(response="test"), temperature=0.7)
+        
+        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        assert kwargs["temperature"] == 0.7

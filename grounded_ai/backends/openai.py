@@ -40,7 +40,7 @@ class OpenAIBackend(BaseEvaluator):
         self.kwargs = kwargs
 
     def _call_backend(
-        self, input_data: BaseModel, output_schema: Type[BaseModel]
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         # Construct Prompt
         system_prompt = (
@@ -59,6 +59,9 @@ class OpenAIBackend(BaseEvaluator):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
+        
+        # Merge init kwargs with runtime kwargs (runtime overrides init)
+        request_kwargs = {**self.kwargs, **kwargs}
 
         try:
             # Call OpenAI with Structured Outputs
@@ -66,7 +69,7 @@ class OpenAIBackend(BaseEvaluator):
                 model=self.model_name,
                 messages=messages,
                 response_format=output_schema,
-                **self.kwargs,
+                **request_kwargs,
             )
 
             message = completion.choices[0].message

@@ -43,7 +43,7 @@ class AnthropicBackend(BaseEvaluator):
         self.kwargs = kwargs
 
     def _call_backend(
-        self, input_data: BaseModel, output_schema: Type[BaseModel]
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         # Construct Prompt
         system_prompt = (
@@ -86,6 +86,9 @@ class AnthropicBackend(BaseEvaluator):
             return schema
 
         json_schema = _enforce_strict_schema(json_schema)
+        
+        # Merge init kwargs with runtime kwargs (runtime overrides init)
+        request_kwargs = {**self.kwargs, **kwargs}
 
         try:
             # Use Beta Structured Outputs
@@ -96,7 +99,7 @@ class AnthropicBackend(BaseEvaluator):
                 messages=[{"role": "user", "content": user_content}],
                 betas=["structured-outputs-2025-11-13"],
                 output_format={"type": "json_schema", "schema": json_schema},
-                **self.kwargs,
+                **request_kwargs,
             )
 
             # Response is raw string in content[0].text which we parse

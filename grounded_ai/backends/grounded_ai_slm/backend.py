@@ -136,7 +136,7 @@ class GroundedAISLMBackend(BaseEvaluator):
         )
 
     def _call_backend(
-        self, input_data: BaseModel, output_schema: Type[BaseModel]
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> BaseModel:
         # 3. Format Prompt
         prompt = self._format_prompt(input_data)
@@ -147,12 +147,16 @@ class GroundedAISLMBackend(BaseEvaluator):
             {"role": "user", "content": prompt},
         ]
 
+        # Defaults
         generation_args = {
             "max_new_tokens": 100,
             "temperature": 0.1,
             "do_sample": True,
             "pad_token_id": self.tokenizer.eos_token_id,
         }
+        
+        # Merge with kwargs overrides
+        generation_args.update(kwargs)
 
         outputs = self.pipeline(messages, **generation_args)
         raw_output = outputs[0]["generated_text"][-1]["content"].strip()

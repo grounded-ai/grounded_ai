@@ -32,6 +32,7 @@ class BaseEvaluator(ABC):
         self,
         input_data: Union[BaseModel, Dict[str, Any]],
         output_schema: Type[BaseModel] = None,
+        **kwargs,
     ) -> Union[BaseModel, EvaluationError]:
         """
         Run the evaluation.
@@ -39,6 +40,7 @@ class BaseEvaluator(ABC):
         Args:
             input_data: Either an instance of input_schema or a dictionary matching it.
             output_schema: Optional Pydantic model to override the default output_schema for this call.
+            **kwargs: Additional arguments to pass to the backend (e.g. temperature, max_tokens).
 
         Returns:
             An instance of the effective output_schema or EvaluationError on failure.
@@ -51,11 +53,11 @@ class BaseEvaluator(ABC):
         target_schema = output_schema or self.output_schema
 
         # 3. Delegate to specific backend implementation
-        return self._call_backend(input_data, target_schema)
+        return self._call_backend(input_data, target_schema, **kwargs)
 
     @abstractmethod
     def _call_backend(
-        self, input_data: BaseModel, output_schema: Type[BaseModel]
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         """
         Implementation specific logic to call the model.
@@ -63,5 +65,6 @@ class BaseEvaluator(ABC):
         Args:
             input_data: The validated input model instance.
             output_schema: The target output schema class to populate.
+            **kwargs: Runtime arguments (temperature, etc.)
         """
         pass

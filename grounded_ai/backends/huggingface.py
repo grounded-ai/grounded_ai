@@ -45,22 +45,26 @@ class HuggingFaceBackend(BaseEvaluator):
         self.pipeline = pipeline(task, model=self.model_id, device=device, **kwargs)
 
     def _call_backend(
-        self, input_data: BaseModel, output_schema: Type[BaseModel]
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         if self.task == "text-classification":
-            return self._evaluate_classification(input_data, output_schema)
+            return self._evaluate_classification(input_data, output_schema, **kwargs)
         else:
-            return self._evaluate_generation(input_data, output_schema)
+            return self._evaluate_generation(input_data, output_schema, **kwargs)
 
     def _evaluate_classification(
-        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None
+        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None, **kwargs
     ) -> BaseModel:
         """Handle BERT-style classification models."""
         eval_text = input_data.response
         if input_data.context:
             eval_text = f"Context: {input_data.context}\nText: {eval_text}"
+            
+        # Merge defaults with kwargs
+        # Default top_k=1 
+        call_kwargs = {"top_k": 1, **kwargs}
 
-        results = self.pipeline(eval_text, top_k=1)
+        results = self.pipeline(eval_text, **call_kwargs)
         top_result = results[0] if isinstance(results, list) else results
 
         label = top_result.get("label", "unknown")
@@ -74,7 +78,7 @@ class HuggingFaceBackend(BaseEvaluator):
         )
 
     def _evaluate_generation(
-        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None
+        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None, **kwargs
     ) -> BaseModel:
         """Handle Generative LLMs using chat-style messaging."""
 
@@ -92,10 +96,13 @@ class HuggingFaceBackend(BaseEvaluator):
             user_content = str(input_data.model_dump())
 
         messages.append({"role": "user", "content": user_content})
+        
+        # Merge defaults with kwargs
+        call_kwargs = {"max_new_tokens": 100, "return_full_text": False, **kwargs}
 
         # Generate
         # When passing messages to text-generation pipeline, it returns a list of dicts (the conversation)
-        output = self.pipeline(messages, max_new_tokens=100, return_full_text=False)
+        output = self.pipeline(messages, **call_kwargs)
 
         # Extract the assistant's response.
         # Output format is typically: [{'generated_text': [{'role': '...', 'content': '...'}, ...]}]
