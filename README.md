@@ -60,7 +60,7 @@ from grounded_ai import Evaluator, EvalMode
 
 # Initialize for Hallucination detection
 evaluator = Evaluator(
-    "grounded-ai/hallucination-v1",
+    "grounded-ai/phi4-mini-judge",
     eval_mode=EvalMode.HALLUCINATION,
     device="cuda" # or "cpu"
 )
