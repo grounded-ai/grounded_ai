@@ -6,17 +6,17 @@
 
 **The Universal Evaluation Interface for LLM Applications.**
 
-`grounded-ai` provides a unified, type-safe Python API to evaluate your LLM application's outputs using either local Small Language Models (SLMs) or frontier Cloud Models (OpenAI, Anthropic).
+`grounded-ai` provides a unified, type-safe Python API to evaluate your LLM application's outputs. It supports a wide range of backends, from local Small Language Models (SLMs) to frontier LLMs (OpenAI, Anthropic).
 
-We standardize the **Inputs** (Response, Query, Context) and **Outputs** (Score, Label, Confidence, Reasoning) regardless of the underlying model backend.
+We standardize the evaluation interface while keeping everything modular. Define your own Inputs, Outputs, System Prompts, and prompt formatting logic—or use our defaults.
 
 ## Features
 
-- **Unified API**: Switch between local SLMs and cloud providers just by changing the model string.
-- **Strict Typing**: All inputs (`EvaluationInput`) and outputs (`EvaluationOutput`) are Pydantic models.
-- **Local Privacy**: Run Grounded AI's fine-tuned evaluation models locally on your GPU (zero data egress).
-- **Structured Outputs**: Native support for OpenAI (`parse`) and Anthropic (`tool_use`) JSON constraints.
-- **Customizable**: Use Jinja2 templates to format your prompts exactly how you want.
+- **Unified Interface**: Run evaluations across any backend (Local SLM, HuggingFace, OpenAI, Anthropic) with the same API.
+- **Highly Modular**: Override everything. Bring your own Pydantic schemas for Input/Output, inject custom system prompts, or use Jinja2 templating for partial prompts.
+- **Strict Typing**: All inputs (`EvaluationInput`) and outputs (`EvaluationOutput`) are validated Pydantic models by default.
+- **Local Privacy**: Run evaluation models locally on your GPU (zero data egress). Use our specialized SLMs or bring your own HuggingFace model.
+- **Structured Outputs**: Native support for JSON schema enforcement across all backends.
 
 ## Implementation Status
 
@@ -25,20 +25,21 @@ We standardize the **Inputs** (Response, Query, Context) and **Outputs** (Score,
 | **Grounded AI SLM** | ✅ **Production** | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
 | **OpenAI** | ✅ **Production** | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
 | **Anthropic** | ✅ **Production** | Uses `claude-4-5` series with Beta Structured Outputs. |
-| **HuggingFace** | 🚧 **Beta** | Run any generic HF model locally. |
+| **HuggingFace** | ✅ **Production** | Run any generic HF model locally. |
 | **Integrations** | 🏗️ **Planned** | LangSmith Tracing, OpenTelemetry, AWS Bedrock. |
 
 ## Backend Capabilities
 
-| Feature | OpenAI | Anthropic | HuggingFace | Grounded AI SLM |
+| Feature | Grounded AI SLM | OpenAI | Anthropic | HuggingFace |
 | :--- | :--- | :--- | :--- | :--- |
-| **System Prompt Fallback** | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `SYSTEM_PROMPT_BASE` |
-| **Input Formatting** | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | 🛠️ Specialized Jinja |
-| **Schema Validation** | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection | ⚡ Regex Parsing |
+| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection |
+
 
 ## Installation
 
-**Basic (Cloud Backends only):**
+**Basic (LLM Providers only):**
 ```bash
 pip install grounded-ai
 ```
@@ -102,7 +103,7 @@ result = evaluator.evaluate(response="This content is safe.")
 
 ### 4. Custom Templating
 
-You can completely customize how your inputs are presented to the model using Jinja2 templates. Variables `{{ response }}`, `{{ context }}`, `{{ query }}` are available.
+You can completely customize how your inputs are presented to the model using Jinja2 templates. Variables `{{ response }}`, `{{ context }}`, `{{ query }}` are available by default.
 
 ```python
 from grounded_ai import Evaluator, EvaluationInput
@@ -131,15 +132,46 @@ input_data = EvaluationInput(
 result = evaluator.evaluate(input_data)
 ```
 
+### 5. Completely Custom Logic (Modular Schemas)
+    
+You are not limited to our `EvaluationInput` or `EvaluationOutput`. You can define **ANY** Pydantic model for input and output, and the library will handle the rest.
+
+```python
+from pydantic import BaseModel, Field
+
+# 1. Define your own Input Schema
+class CodeReviewInput(BaseModel):
+    code: str
+    language: str
+
+# 2. Define your own Output Schema
+class CodeReviewOutput(BaseModel):
+    bugs_found: int
+    security_risk: bool
+    suggestions: list[str]
+
+# 3. Initialize Evaluator (Any backend)
+evaluator = Evaluator("openai/gpt-4o", system_prompt="You are a senior engineer.")
+
+# 4. Run Evaluation
+result = evaluator.evaluate(
+    input_data=CodeReviewInput(code="print('hello')", language="python"),
+    output_schema=CodeReviewOutput
+)
+
+print(result.security_risk) # False
+print(result.suggestions)   # ['Add type hints', ...]
+```
+
 ## API Reference
 
 ### `Evaluator` Factory
 
 ```python
 Evaluator(
-    model: str,          # e.g., "grounded-ai/...", "openai/...", "anthropic/..."
-    eval_mode: str,      # Optional: "TOXICITY", "HALLUCINATION", "RAG_RELEVANCE"
-    **kwargs             # Backend-specific args (e.g. quantization=True, temperature=0.1)
+    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/..."
+    eval_mode: str,  # Required for Grounded AI SLMs only ("TOXICITY", "HALLUCINATION", "RAG_RELEVANCE")
+    **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1)
 )
 ```
 
@@ -147,7 +179,7 @@ Evaluator(
 
 ```python
 evaluate(
-    response: str,              # The primary content to evaluate (output/document)
+    response: str,              # The primary content to evaluate from the model or user
     query: Optional[str],       # User question
     context: Optional[str]      # Retrieved context or ground truth
 ) -> EvaluationOutput | EvaluationError
@@ -165,8 +197,8 @@ class EvaluationOutput(BaseModel):
 
 ## Contributing
 
-We welcome contributions! Please see `TODOs.md` for the current roadmap and `design.md` for architecture details.
+We welcome contributions! Please feel free to submit a Pull Request or open an Issue on GitHub.
 
 ## License
 
-Apache 2.0
+MIT 
