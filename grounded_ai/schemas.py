@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field, computed_field
 class EvaluationInput(BaseModel):
     """
     Standard input for Grounded AI evaluators.
-    
+
     Fields:
     - response: The primary text content to evaluate (e.g. LLM output, Retrieved Doc, or generic text).
     - query: The user's original question or prompt.
     - context: Background information, ground truth, or knowledge base.
     """
+
     response: str
     query: Optional[str] = None
     context: Optional[str] = None

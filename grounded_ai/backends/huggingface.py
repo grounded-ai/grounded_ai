@@ -2,7 +2,7 @@ from typing import Type, Union
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationInput, EvaluationError
+from ..schemas import EvaluationInput, EvaluationOutput, EvaluationError
 
 try:
     from transformers import pipeline
@@ -21,11 +21,15 @@ class HuggingFaceBackend(BaseEvaluator):
         model_id: str,
         device: str = None,
         task: str = None,
-        input_schema: Type[BaseModel] = None,
-        output_schema: Type[BaseModel] = None,
+        input_schema: Type[BaseModel] = EvaluationInput,
+        output_schema: Type[BaseModel] = EvaluationOutput,
         **kwargs,
     ):
-        super().__init__(input_schema=input_schema, output_schema=output_schema)
+        super().__init__(
+            input_schema=input_schema,
+            output_schema=output_schema,
+            system_prompt=kwargs.pop("system_prompt", None),
+        )
         if pipeline is None:
             raise ImportError(
                 "transformers package is not installed. Please install it via `pip install transformers`."
@@ -72,17 +76,38 @@ class HuggingFaceBackend(BaseEvaluator):
     def _evaluate_generation(
         self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None
     ) -> BaseModel:
-        """Handle Generative LLMs with simple text generation."""
+        """Handle Generative LLMs using chat-style messaging."""
 
-        # Simple Prompt
+        messages = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+
+        # User Content
         if hasattr(input_data, "formatted_prompt"):
-            prompt = input_data.formatted_prompt
+            user_content = input_data.formatted_prompt
+        elif hasattr(input_data, "response"):
+            user_content = f"Evaluate: {input_data.response}"
         else:
-            prompt = f"Evaluate: {input_data.response}"
+            # Fallback for custom models
+            user_content = str(input_data.model_dump())
+
+        messages.append({"role": "user", "content": user_content})
 
         # Generate
-        output = self.pipeline(prompt, max_new_tokens=100, return_full_text=False)
-        generated_text = output[0]["generated_text"].strip()
+        # When passing messages to text-generation pipeline, it returns a list of dicts (the conversation)
+        output = self.pipeline(messages, max_new_tokens=100, return_full_text=False)
+
+        # Extract the assistant's response.
+        # Output format is typically: [{'generated_text': [{'role': '...', 'content': '...'}, ...]}]
+        # BUT if return_full_text=False, it might return just the string for some models/versions.
+        generated_content = output[0]["generated_text"]
+
+        if isinstance(generated_content, list):
+            # It's a list of messages
+            generated_text = generated_content[-1]["content"].strip()
+        else:
+            # It's a raw string
+            generated_text = str(generated_content).strip()
 
         return output_schema(
             score=0.0, label="generated_text", confidence=0.0, reasoning=generated_text

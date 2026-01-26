@@ -16,7 +16,7 @@ from transformers import (
 )
 
 from ...base import BaseEvaluator
-from ...schemas import EvaluationInput
+from ...schemas import EvaluationInput, EvaluationOutput
 
 from .prompts import (
     SYSTEM_PROMPT_BASE,
@@ -47,10 +47,16 @@ class GroundedAISLMBackend(BaseEvaluator):
         device: str = None,
         quantization: bool = False,
         eval_mode: Optional[Union[EvalMode, str]] = None,
-        input_schema: Type[BaseModel] = None,
-        output_schema: Type[BaseModel] = None,
+        input_schema: Type[BaseModel] = EvaluationInput,
+        output_schema: Type[BaseModel] = EvaluationOutput,
+        system_prompt: str = None,
+        **kwargs,
     ):
-        super().__init__(input_schema=input_schema, output_schema=output_schema)
+        super().__init__(
+            input_schema=input_schema,
+            output_schema=output_schema,
+            system_prompt=system_prompt,
+        )
         self.model_id = model_id
         self.quantization = quantization
         if torch is not None:
@@ -132,15 +138,12 @@ class GroundedAISLMBackend(BaseEvaluator):
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel]
     ) -> BaseModel:
-        # 2. Strict Internal Validation (The "Grounded AI" Special Sauce)
-        self._validate_strictly(input_data)
-
         # 3. Format Prompt
         prompt = self._format_prompt(input_data)
 
         # 4. Generate
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT_BASE},
+            {"role": "system", "content": self.system_prompt or SYSTEM_PROMPT_BASE},
             {"role": "user", "content": prompt},
         ]
 
@@ -156,11 +159,6 @@ class GroundedAISLMBackend(BaseEvaluator):
 
         # 5. Parse Output
         return self._parse_output(raw_output, output_schema)
-
-    def _validate_strictly(self, input_data: EvaluationInput):
-        """Converts universal input to strict internal schema to ensure safety."""
-        # Using the logic from previous session, integrated with correct imports
-        pass  # Placeholder for strict validation integration
 
     def _format_prompt(self, input_model: EvaluationInput) -> str:
         template = Template(self.prompt_template)

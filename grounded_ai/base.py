@@ -14,9 +14,11 @@ class BaseEvaluator(ABC):
         self,
         input_schema: Type[BaseModel] = None,
         output_schema: Type[BaseModel] = None,
+        system_prompt: str = None,
     ):
         self._input_schema = input_schema
         self._output_schema = output_schema
+        self.system_prompt = system_prompt
 
     @property
     def input_schema(self) -> Type[BaseModel]:
