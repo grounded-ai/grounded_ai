@@ -5,10 +5,11 @@ from unittest.mock import MagicMock, patch
 
 # Pre-mock anthropic module
 mock_anthropic_module = MagicMock()
+mock_anthropic_module.__spec__ = MagicMock()
 sys.modules["anthropic"] = mock_anthropic_module
 
-from grounded_ai import Evaluator, EvaluationOutput, EvaluationError, EvaluationInput
-from grounded_ai.backends.anthropic import AnthropicBackend
+from grounded_ai import Evaluator, EvaluationOutput, EvaluationError, EvaluationInput  # noqa: E402
+from grounded_ai.backends.anthropic import AnthropicBackend  # noqa: E402
 
 class TestAnthropicBackend:
 
@@ -23,7 +24,7 @@ class TestAnthropicBackend:
 
     def test_factory_routing(self):
         """Test that 'anthropic/*' routes correctly."""
-        with patch("grounded_ai.backends.anthropic.Anthropic") as MockAnthropic:
+        with patch("grounded_ai.backends.anthropic.Anthropic"):
             evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
             assert isinstance(evaluator.backend, AnthropicBackend)
             assert evaluator.backend.model_name == "claude-haiku-4-5-20251001"
@@ -32,7 +33,7 @@ class TestAnthropicBackend:
         """Test successful evaluation and verify schema patching logic."""
         # Setup mock response
         mock_content = MagicMock()
-        mock_content.response = json.dumps({
+        mock_content.text = json.dumps({
             "score": 0.85,
             "label": "faithful",
             "confidence": 0.9,
@@ -46,7 +47,7 @@ class TestAnthropicBackend:
         result = backend.evaluate(EvaluationInput(
             response="Paris is capital.",
             query="Capital?",
-            conresponse="Paris is capital of France."
+            context="Paris is capital of France."
         ))
 
         # 1. Assert Result

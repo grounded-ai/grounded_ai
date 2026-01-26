@@ -4,6 +4,7 @@ import logging
 from typing import Optional, Type, Union
 from pydantic import BaseModel
 from jinja2 import Template
+from enum import Enum
 
 import torch
 from peft import PeftConfig, PeftModel
@@ -26,8 +27,6 @@ from .prompts import (
 
 # Constants
 BASE_MODEL_ID = os.getenv("BASE_MODEL_ID", "microsoft/Phi-4-mini-instruct")
-
-from enum import Enum
 
 
 class EvalMode(str, Enum):

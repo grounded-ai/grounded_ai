@@ -1,4 +1,4 @@
-from typing import Optional, Type, Union, Any, Dict
+from typing import Type, Union, Any, Dict
 from pydantic import BaseModel
 
 from .base import BaseEvaluator

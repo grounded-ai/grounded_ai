@@ -3,9 +3,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 # Pre-mock dependencies before imports
-import sys
-import pytest
-from unittest.mock import MagicMock, patch
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,7 +13,7 @@ else:
     EvalMode = None
 
 from grounded_ai import Evaluator
-from grounded_ai.schemas import EvaluationInput, EvaluationOutput
+from grounded_ai.schemas import EvaluationOutput
 
 class TestSLMBackend:
     
@@ -59,7 +56,7 @@ class TestSLMBackend:
              patch("grounded_ai.backends.grounded_ai_slm.backend.AutoModelForCausalLM") as mock_automodel, \
              patch("grounded_ai.backends.grounded_ai_slm.backend.AutoTokenizer") as mock_tokenizer, \
              patch("grounded_ai.backends.grounded_ai_slm.backend.PeftModel") as mock_peft, \
-             patch("grounded_ai.backends.grounded_ai_slm.backend.PeftConfig") as mock_config:
+             patch("grounded_ai.backends.grounded_ai_slm.backend.PeftConfig"):
             
             # Setup default behavior for pipeline
             mock_generator = MagicMock()
@@ -91,7 +88,7 @@ class TestSLMBackend:
         result = evaluator.evaluate(
             response="London is the capital.", # This maps to RESPONSE in hallucination
             query="What is the capital?",
-            reference="London is the capital of UK."
+            context="London is the capital of UK."
         )
         
         assert isinstance(result, EvaluationOutput)

@@ -21,19 +21,10 @@ class EvaluationInput(BaseModel):
     # Powerful default Jinja2 template handling logic
     base_template: str = """
         Task: Evaluate the following content.
+        {% if context %}Context: {{ context }}{% endif %}
+        {% if query %}Query: {{ query }}{% endif %}
 
-        {%- if query %}
-        Query: {{ query }}
-        {%- endif %}
-        {%- if context %}
-        Context: {{ context }}
-        {%- endif %}
-        {%- if reference %}
-        Reference: {{ reference }}
-        {%- endif %}
-
-        Content to Evaluate:
-        {{ text }}
+        Response: {{ response }}
     """
 
     @computed_field

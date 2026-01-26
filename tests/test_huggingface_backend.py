@@ -1,13 +1,9 @@
 import pytest
 from grounded_ai import Evaluator
-from grounded_ai.schemas import EvaluationInput, EvaluationOutput
+from grounded_ai.schemas import EvaluationOutput
 
-try:
-    import transformers
-    import torch
-    HAS_DEPS = True
-except ImportError:
-    HAS_DEPS = False
+import importlib.util
+HAS_DEPS = importlib.util.find_spec("transformers") is not None and importlib.util.find_spec("torch") is not None
 
 @pytest.mark.skipif(not HAS_DEPS, reason="transformers or torch not installed")
 class TestHuggingFaceBackend:
@@ -30,7 +26,7 @@ class TestHuggingFaceBackend:
         result = evaluator.evaluate(
             response="The sky is blue.",
             query="What color is the sky?",
-            conresponse="The sky appears blue to the human eye."
+            context="The sky appears blue to the human eye."
         )
 
         # Basic assertions on the output

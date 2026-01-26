@@ -1,5 +1,5 @@
 import unittest
-from pydantic import BaseModel, computed_field
+from pydantic import computed_field
 from grounded_ai.schemas import EvaluationInput, EvaluationOutput
 
 class TestSchemaParsing(unittest.TestCase):
@@ -9,8 +9,7 @@ class TestSchemaParsing(unittest.TestCase):
         input_data = EvaluationInput(
             response="This is a test submission.",
             query="Is this a test?",
-            conresponse="Testing context.",
-            reference="Test reference."
+            context="Testing context."
         )
         
         # Strip whitespace for cleaner testing
@@ -19,9 +18,8 @@ class TestSchemaParsing(unittest.TestCase):
         # Check that all components are present in the default template
         self.assertIn("Query: Is this a test?", prompt)
         self.assertIn("Context: Testing context.", prompt)
-        self.assertIn("Reference: Test reference.", prompt)
-        # Fix: assertIn is loose enough for substrings, but let's be safe regarding newlines
-        self.assertIn("Content to Evaluate:", prompt)
+        # Fix: New template logic uses strict fields
+        self.assertIn("Response:", prompt)
         self.assertIn("This is a test submission.", prompt)
 
     def test_partial_fields_templating(self):
@@ -31,7 +29,7 @@ class TestSchemaParsing(unittest.TestCase):
         prompt = input_data.formatted_prompt
         
         # In the new implementation, None fields are excluded entirely
-        self.assertIn("Content to Evaluate:", prompt)
+        self.assertIn("Response:", prompt)
         self.assertIn("Just text here.", prompt)
         self.assertNotIn("Query:", prompt) 
         self.assertNotIn("Context:", prompt)
@@ -39,7 +37,7 @@ class TestSchemaParsing(unittest.TestCase):
     def test_runtime_template_override(self):
         """Test overriding the base_template at runtime instantiation."""
         # Update to use JINJA syntax {{ }}
-        custom_tmpl = "STRICT FORMAT :: Q: {{ query }} -> A: {{ text }}"
+        custom_tmpl = "STRICT FORMAT :: Q: {{ query }} -> A: {{ response }}"
         
         input_data = EvaluationInput(
             response="My Answer",
@@ -70,19 +68,11 @@ class TestSchemaParsing(unittest.TestCase):
         )
         
         self.assertEqual(trace_data.formatted_prompt, "Analyze Trace 0x1234: DB Query failed")
-        
-        # Ensure it still looks like an EvaluationInput for duck typing if needed
         self.assertIsInstance(trace_data, EvaluationInput)
 
     def test_model_dump_includes_computed(self):
         """Ensure computed fields are included when dumping."""
         input_data = EvaluationInput(response="Dump test")
-        
-        # model_dump() usually doesn't include computed fields by default in older v2
-        # but usage in code might expect access via property. 
-        # Let's check if we strictly need it in the dict.
-        # Actually, standard pydantic v2 'model_dump' does NOT include computed fields unless requested?
-        # Wait, @computed_field decorator DOES include it in serialization (dump types 'json' or 'python').
         
         dump = input_data.model_dump()
         
@@ -91,7 +81,7 @@ class TestSchemaParsing(unittest.TestCase):
         
         # computed_field should appear in the dump
         self.assertIn('formatted_prompt', dump)
-        self.assertIn("Content to Evaluate:", dump['formatted_prompt'])
+        self.assertIn("Response:", dump['formatted_prompt'])
         self.assertIn("Dump test", dump['formatted_prompt'])
 
     def test_output_schema_instantiation(self):
