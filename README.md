@@ -34,7 +34,6 @@ We standardize the **Inputs** (Response, Query, Context) and **Outputs** (Score,
 | :--- | :--- | :--- | :--- | :--- |
 | **System Prompt Fallback** | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `SYSTEM_PROMPT_BASE` |
 | **Input Formatting** | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | 🛠️ Specialized Jinja |
-| **Kwargs Passthrough** | ✅ Merged | ✅ Merged | ✅ Merged | ✅ Merged |
 | **Schema Validation** | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection | ⚡ Regex Parsing |
 
 ## Installation
