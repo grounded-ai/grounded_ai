@@ -59,7 +59,7 @@ class OpenAIBackend(BaseEvaluator):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
-        
+
         # Merge init kwargs with runtime kwargs (runtime overrides init)
         request_kwargs = {**self.kwargs, **kwargs}
 

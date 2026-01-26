@@ -154,7 +154,7 @@ class GroundedAISLMBackend(BaseEvaluator):
             "do_sample": True,
             "pad_token_id": self.tokenizer.eos_token_id,
         }
-        
+
         # Merge with kwargs overrides
         generation_args.update(kwargs)
 

@@ -53,15 +53,18 @@ class HuggingFaceBackend(BaseEvaluator):
             return self._evaluate_generation(input_data, output_schema, **kwargs)
 
     def _evaluate_classification(
-        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None, **kwargs
+        self,
+        input_data: EvaluationInput,
+        output_schema: Type[BaseModel] = None,
+        **kwargs,
     ) -> BaseModel:
         """Handle BERT-style classification models."""
         eval_text = input_data.response
         if input_data.context:
             eval_text = f"Context: {input_data.context}\nText: {eval_text}"
-            
+
         # Merge defaults with kwargs
-        # Default top_k=1 
+        # Default top_k=1
         call_kwargs = {"top_k": 1, **kwargs}
 
         results = self.pipeline(eval_text, **call_kwargs)
@@ -78,7 +81,10 @@ class HuggingFaceBackend(BaseEvaluator):
         )
 
     def _evaluate_generation(
-        self, input_data: EvaluationInput, output_schema: Type[BaseModel] = None, **kwargs
+        self,
+        input_data: EvaluationInput,
+        output_schema: Type[BaseModel] = None,
+        **kwargs,
     ) -> BaseModel:
         """Handle Generative LLMs using chat-style messaging."""
 
@@ -96,7 +102,7 @@ class HuggingFaceBackend(BaseEvaluator):
             user_content = str(input_data.model_dump())
 
         messages.append({"role": "user", "content": user_content})
-        
+
         # Merge defaults with kwargs
         call_kwargs = {"max_new_tokens": 100, "return_full_text": False, **kwargs}
 
