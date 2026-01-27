@@ -126,7 +126,7 @@ class TestSLMBackend:
         """Test that the factory routes 'grounded-ai/*' to SLM backend."""
         evaluator = Evaluator("grounded-ai/hallucination-v1", eval_mode="hallucination")
         assert isinstance(evaluator.backend, GroundedAISLMBackend)
-        assert evaluator.backend.default_task == EvalMode.HALLUCINATION
+        assert evaluator.backend.task == EvalMode.HALLUCINATION
 
     def test_hallucination_flow(self, mock_deps):
         """Test a full hallucination evaluation flow."""
@@ -160,7 +160,7 @@ class TestSLMBackend:
         ]
 
         evaluator = Evaluator("grounded-ai/toxic-judge-v1", eval_mode="TOXICITY")
-        assert evaluator.backend.default_task == EvalMode.TOXICITY
+        assert evaluator.backend.task == EvalMode.TOXICITY
 
         result = evaluator.evaluate(response="You are stupid.")
 
@@ -184,11 +184,11 @@ class TestSLMBackend:
         evaluator = Evaluator(
             "grounded-ai/rag-relevance-v1", eval_mode=EvalMode.RAG_RELEVANCE
         )
-        assert evaluator.backend.default_task == EvalMode.RAG_RELEVANCE
+        assert evaluator.backend.task == EvalMode.RAG_RELEVANCE
 
         result = evaluator.evaluate(
             query="Question?",
-            context="Document content.",  # 'text' is the reference text in RAG relevance inputs
+            response="Document content.",  # 'text' is the reference text in RAG relevance inputs
         )
 
         assert result.score == 1.0  # Relevant -> 1.0

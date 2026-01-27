@@ -64,46 +64,30 @@ class GroundedAISLMBackend(BaseEvaluator):
         else:
             self.device = "cpu"
 
-        # Initialize default task if provided
-        self.default_task = None
-        if eval_mode:
-            self.default_task = self._parse_eval_mode(eval_mode)
-            
+        if not eval_mode:
+            raise ValueError(
+                "eval_mode must be explicitly specified for GroundedAISLMBackend. "
+                "Options: 'TOXICITY', 'RAG_RELEVANCE', 'HALLUCINATION'."
+            )
+
+        # Robust enum conversion: handle string (case-insensitive) or Enum input
+        if isinstance(eval_mode, str):
+            try:
+                self.task = EvalMode(eval_mode.upper())
+            except ValueError:
+                raise ValueError(
+                    f"Invalid eval_mode '{eval_mode}'. Options: {[e.value for e in EvalMode]}"
+                )
+        else:
+            self.task = EvalMode(eval_mode)
+        self.prompt_template = self._get_template(self.task)
+
         self.tokenizer = None
         self.base_model = None
         self.merged_model = None
         self.pipeline = None
+
         self._load_model()
-
-    def _parse_eval_mode(self, mode: Union[EvalMode, str]) -> EvalMode:
-        """Helper to normalize eval_mode string to Enum."""
-        if isinstance(mode, EvalMode):
-            return mode
-        if isinstance(mode, str):
-            try:
-                return EvalMode(mode.upper())
-            except ValueError:
-                raise ValueError(
-                    f"Invalid eval_mode '{mode}'. Options: {[e.value for e in EvalMode]}"
-                )
-        return None
-
-    def _resolve_task(self, kwargs: dict) -> EvalMode:
-        """Determine effective task from kwargs or default."""
-        # 1. Check runtime kwarg
-        runtime_mode = kwargs.pop("eval_mode", None)
-        if runtime_mode:
-            return self._parse_eval_mode(runtime_mode)
-        
-        # 2. Check instance default
-        if self.default_task:
-            return self.default_task
-            
-        # 3. Fail
-        raise ValueError(
-            "eval_mode must be specified either in init() or evaluate(). "
-            "Options: 'TOXICITY', 'RAG_RELEVANCE', 'HALLUCINATION'."
-        )
 
     def _get_template(self, task: EvalMode) -> str:
         prompt_map = {
@@ -154,14 +138,8 @@ class GroundedAISLMBackend(BaseEvaluator):
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> BaseModel:
-        # 1. Resolve Task (eval_mode)
-        task = self._resolve_task(kwargs)
-        
-        # 2. Get Template
-        template_str = self._get_template(task)
-        
         # 3. Format Prompt
-        prompt = self._format_prompt(input_data, task, template_str)
+        prompt = self._format_prompt(input_data)
 
         # 4. Generate
         messages = [
@@ -184,22 +162,22 @@ class GroundedAISLMBackend(BaseEvaluator):
         raw_output = outputs[0]["generated_text"][-1]["content"].strip()
 
         # 5. Parse Output
-        return self._parse_output(raw_output, task, output_schema)
+        return self._parse_output(raw_output, output_schema)
 
-    def _format_prompt(self, input_model: EvaluationInput, task: EvalMode, template_str: str) -> str:
-        template = Template(template_str)
+    def _format_prompt(self, input_model: EvaluationInput) -> str:
+        template = Template(self.prompt_template)
 
-        if task == EvalMode.TOXICITY:
+        if self.task == EvalMode.TOXICITY:
             # Toxicity Base expects 'text'
             return template.render(text=input_model.response)
 
-        elif task == EvalMode.RAG_RELEVANCE:
+        elif self.task == EvalMode.RAG_RELEVANCE:
             # RAG Base expects 'text' (the doc) and 'query'
             # Fallback: if user passed 'context' but no 'response', treat context as the doc
             doc_text = input_model.response or input_model.context
             return template.render(text=doc_text, query=input_model.query)
 
-        elif task == EvalMode.HALLUCINATION:
+        elif self.task == EvalMode.HALLUCINATION:
             # Hallucination expects 'response', 'query', 'reference'
             return template.render(
                 response=input_model.response,
@@ -210,7 +188,7 @@ class GroundedAISLMBackend(BaseEvaluator):
         return input_model.response
 
     def _parse_output(
-        self, raw_response: str, task: EvalMode, output_schema: Type[BaseModel] = None
+        self, raw_response: str, output_schema: Type[BaseModel] = None
     ) -> BaseModel:
         rating_match = re.search(r"<rating>(.*?)</rating>", raw_response)
         reasoning_match = re.search(
@@ -225,21 +203,21 @@ class GroundedAISLMBackend(BaseEvaluator):
         score = 0.0
         label = rating_str
 
-        if task == EvalMode.TOXICITY:
+        if self.task == EvalMode.TOXICITY:
             if "non-toxic" in rating_str:
                 score = 0.0
                 label = "non-toxic"
             else:
                 score = 1.0
                 label = "toxic"
-        elif task == EvalMode.RAG_RELEVANCE:
+        elif self.task == EvalMode.RAG_RELEVANCE:
             if "relevant" in rating_str:
                 score = 1.0
                 label = "relevant"
             else:
                 score = 0.0
                 label = "unrelated"
-        elif task == EvalMode.HALLUCINATION:
+        elif self.task == EvalMode.HALLUCINATION:
             if "accurate" in rating_str or "no" in rating_str:
                 score = 0.0
                 label = "faithful"
