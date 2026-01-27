@@ -3,18 +3,8 @@ name: CI
 on:
   push:
     branches: [ "main", "sbx" ]
-    paths:
-      - 'grounded_ai/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - '.github/workflows/**'
   pull_request:
     branches: [ "main" ]
-    paths:
-      - 'grounded_ai/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - '.github/workflows/**'
 
 jobs:
   build:

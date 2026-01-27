@@ -71,7 +71,7 @@ class Evaluator:
         elif input_data is None:
             input_data = EvaluationInput(**kwargs)
 
-        return self.backend.evaluate(input_data, output_schema=output_schema, **kwargs)
+        return self.backend.evaluate(input_data, output_schema=output_schema)
 
 
 __all__ = ["Evaluator", "EvaluationInput", "EvaluationOutput", "EvaluationError"]
