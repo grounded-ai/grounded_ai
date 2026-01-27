@@ -2,30 +2,32 @@
 
 ![CI](https://github.com/grounded-ai/grounded_ai/actions/workflows/ci.yml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/grounded-ai)](https://pypi.org/project/grounded-ai/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 **The Universal Evaluation Interface for LLM Applications.**
 
-`grounded-ai` provides a unified, type-safe Python API to evaluate your LLM application's outputs. It supports a wide range of backends, from local Small Language Models (SLMs) to frontier LLMs (OpenAI, Anthropic).
+`grounded-ai` provides a unified, type-safe Python API to evaluate your LLM application's outputs. It supports a wide range of backends, from specialized local models to frontier LLMs (OpenAI, Anthropic).
 
 We standardize the evaluation interface while keeping everything modular. Define your own Inputs, Outputs, System Prompts, and prompt formatting logic—or use our defaults.
 
-## Features
+## Why Grounded AI?
 
-- **Unified Interface**: Run evaluations across any backend (Local SLM, HuggingFace, OpenAI, Anthropic) with the same API.
-- **Highly Modular**: Override everything. Bring your own Pydantic schemas for Input/Output, inject custom system prompts, or use Jinja2 templating for partial prompts.
-- **Strict Typing**: All inputs (`EvaluationInput`) and outputs (`EvaluationOutput`) are validated Pydantic models by default.
-- **Local Privacy**: Run evaluation models locally on your GPU (zero data egress). Use our specialized SLMs or bring your own HuggingFace model.
-- **Structured Outputs**: Native support for JSON schema enforcement across all backends.
+Most evaluation libraries are black boxes. **Grounded AI** is different:
+
+1.  **Standardization**: A single, type-safe function (`evaluate()`) for *any* backend (Grounded AI SLM, HuggingFace, OpenAI, Anthropic).
+2.  **Modularity**: Don't like our prompts? **Change them.** Don't like our schemas? **Bring your own.** Every part of the pipeline is customizable.
+3.  **Evaluations Made Easy**: JSON-mode, retries, and schema validation are handled for you. Just focus on your data.
+4.  **Privacy First**: First-class support for running evaluations 100% locally on your own GPU.
+
 
 ## Implementation Status
 
 | Backend | Status | Description |
 | :--- | :--- | :--- |
-| **Grounded AI SLM** | ✅ **Production** | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
-| **OpenAI** | ✅ **Production** | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
-| **Anthropic** | ✅ **Production** | Uses `claude-4-5` series with Beta Structured Outputs. |
-| **HuggingFace** | ✅ **Production** | Run any generic HF model locally. |
+| **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
+| **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
+| **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
+| **HuggingFace** | ✅ | Run any generic HF model locally. |
 | **Integrations** | 🏗️ **Planned** | LangSmith Tracing, OpenTelemetry, AWS Bedrock. |
 
 ## Backend Capabilities
@@ -44,16 +46,16 @@ We standardize the evaluation interface while keeping everything modular. Define
 pip install grounded-ai
 ```
 
-**Local SLM Support (GPU Recommended):**
+**Local Inference Support (GPU Recommended):**
 ```bash
 pip install grounded-ai[slm]
 ```
 
 ## Quick Start
 
-### 1. Using Grounded AI Local SLMs (Recommended)
+### 1. Using Grounded AI Models (Specialized)
 
-Run specialized evaluation models locally.
+Run our specialized evaluation models locally.
 
 ```python
 from grounded_ai import Evaluator, EvalMode
@@ -78,17 +80,28 @@ print(result)
 
 ### 2. Using OpenAI (GPT-4o)
 
+We handle the complexity of "Structured Outputs" for you.
+
 ```python
 import os
 os.environ["OPENAI_API_KEY"] = "sk-..."
 
+# 1. Initialize Evaluator
+# Default System Prompt: "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
 evaluator = Evaluator("openai/gpt-4o")
 
+# 2. Run check (e.g. Hallucination)
 result = evaluator.evaluate(
-    response="The moon is made of cheese.",
-    context="The moon is made of rock."
+    response="The meeting is on Tuesday.",
+    context="The meeting was rescheduled to Wednesday."
 )
+
+print(result)
+# score=1.0 label='hallucinated' reasoning='Contradicts context (Tuesday vs Wednesday).'
 ```
+
+*Want to change the system prompt? Just pass `system_prompt="You are a strict judge..."` to the constructor.*
+
 
 ### 3. Using Anthropic (Claude)
 
@@ -96,9 +109,11 @@ result = evaluator.evaluate(
 import os
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
 
-evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
+# Use the latest efficient models
+evaluator = Evaluator("anthropic/claude-3-5-haiku-20241022")
 
-result = evaluator.evaluate(response="This content is safe.")
+result = evaluator.evaluate(response="How do I break into a car?")
+# score=1.0 label='unsafe' ...
 ```
 
 ### 4. Custom Templating
