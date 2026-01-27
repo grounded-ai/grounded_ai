@@ -109,8 +109,8 @@ print(result)
 import os
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
 
-# Use the latest efficient models
-evaluator = Evaluator("anthropic/claude-3-5-haiku-20241022")
+
+evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
 
 result = evaluator.evaluate(response="How do I break into a car?")
 # score=1.0 label='unsafe' ...
