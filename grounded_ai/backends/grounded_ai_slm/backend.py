@@ -50,7 +50,6 @@ class GroundedAISLMBackend(BaseEvaluator):
         input_schema: Type[BaseModel] = EvaluationInput,
         output_schema: Type[BaseModel] = EvaluationOutput,
         system_prompt: str = None,
-        **kwargs,
     ):
         super().__init__(
             input_schema=input_schema,
@@ -64,30 +63,29 @@ class GroundedAISLMBackend(BaseEvaluator):
         else:
             self.device = "cpu"
 
-        if not eval_mode:
-            raise ValueError(
-                "eval_mode must be explicitly specified for GroundedAISLMBackend. "
-                "Options: 'TOXICITY', 'RAG_RELEVANCE', 'HALLUCINATION'."
-            )
-
-        # Robust enum conversion: handle string (case-insensitive) or Enum input
-        if isinstance(eval_mode, str):
-            try:
-                self.task = EvalMode(eval_mode.upper())
-            except ValueError:
-                raise ValueError(
-                    f"Invalid eval_mode '{eval_mode}'. Options: {[e.value for e in EvalMode]}"
-                )
-        else:
-            self.task = EvalMode(eval_mode)
-        self.prompt_template = self._get_template(self.task)
-
+        self.task = None
+        if eval_mode:
+            self.set_eval_mode(eval_mode)
+            
         self.tokenizer = None
         self.base_model = None
         self.merged_model = None
         self.pipeline = None
-
         self._load_model()
+
+    def set_eval_mode(self, mode: Union[EvalMode, str]):
+        """Sets the evaluation mode/task for the backend."""
+        # Robust enum conversion: handle string (case-insensitive) or Enum input
+        if isinstance(mode, str):
+            try:
+                self.task = EvalMode(mode.upper())
+            except ValueError:
+                raise ValueError(
+                    f"Invalid eval_mode '{mode}'. Options: {[e.value for e in EvalMode]}"
+                )
+        else:
+            self.task = EvalMode(mode)
+        self.prompt_template = self._get_template(self.task)
 
     def _get_template(self, task: EvalMode) -> str:
         prompt_map = {
@@ -138,6 +136,9 @@ class GroundedAISLMBackend(BaseEvaluator):
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> BaseModel:
+        if not self.task:
+             raise ValueError("Eval mode not set. Please provide 'eval_mode' in init or call set_eval_mode().")
+
         # 3. Format Prompt
         prompt = self._format_prompt(input_data)
 
@@ -155,8 +156,11 @@ class GroundedAISLMBackend(BaseEvaluator):
             "pad_token_id": self.tokenizer.eos_token_id,
         }
 
-        # Merge with kwargs overrides
-        generation_args.update(kwargs)
+        # Explicitly allow-list generation arguments to prevent pollution from wrapper kwargs
+        allowed_gen_args = {"temperature", "max_new_tokens", "do_sample", "top_p", "top_k", "repetition_penalty"}
+        for k, v in kwargs.items():
+            if k in allowed_gen_args:
+                generation_args[k] = v
 
         outputs = self.pipeline(messages, **generation_args)
         raw_output = outputs[0]["generated_text"][-1]["content"].strip()
