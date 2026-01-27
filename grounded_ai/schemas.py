@@ -15,7 +15,7 @@ class EvaluationInput(BaseModel):
     - context: Background information, ground truth, or knowledge base.
     """
 
-    response: str
+    response: Optional[str] = None
     query: Optional[str] = None
     context: Optional[str] = None
 

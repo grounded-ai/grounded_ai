@@ -173,7 +173,9 @@ class GroundedAISLMBackend(BaseEvaluator):
 
         elif self.task == EvalMode.RAG_RELEVANCE:
             # RAG Base expects 'text' (the doc) and 'query'
-            return template.render(text=input_model.response, query=input_model.query)
+            # Fallback: if user passed 'context' but no 'response', treat context as the doc
+            doc_text = input_model.response or input_model.context
+            return template.render(text=doc_text, query=input_model.query)
 
         elif self.task == EvalMode.HALLUCINATION:
             # Hallucination expects 'response', 'query', 'reference'
