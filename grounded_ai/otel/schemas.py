@@ -9,7 +9,7 @@ universal adapter for agent traces exported from any observability platform.
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
 # === Core OTel-Compatible Types ===
@@ -27,6 +27,8 @@ class SpanContext(BaseModel):
 
 class TokenUsage(BaseModel):
     """Token usage metrics for LLM calls (OpenLLMetry: gen_ai.usage.*)."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     input_tokens: int = Field(0, alias="gen_ai.usage.input_tokens")
     output_tokens: int = Field(0, alias="gen_ai.usage.output_tokens")
