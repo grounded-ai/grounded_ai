@@ -3,6 +3,15 @@ from pydantic import BaseModel
 
 from .base import BaseEvaluator
 from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
+from .otel import (
+    AgentTrace,
+    AgentSpan,
+    LLMSpan,
+    ToolSpan,
+    RetrievalSpan,
+    TraceConverter,
+    convert_traces,
+)
 # Import backends lazily or generally
 # For now, we import locally within the factory to avoid heavy dependency loading if unused
 
@@ -74,4 +83,17 @@ class Evaluator:
         return self.backend.evaluate(input_data, output_schema=output_schema)
 
 
-__all__ = ["Evaluator", "EvaluationInput", "EvaluationOutput", "EvaluationError"]
+__all__ = [
+    "Evaluator",
+    "EvaluationInput",
+    "EvaluationOutput",
+    "EvaluationError",
+    # OTel types
+    "AgentTrace",
+    "AgentSpan",
+    "LLMSpan",
+    "ToolSpan",
+    "RetrievalSpan",
+    "TraceConverter",
+    "convert_traces",
+]
