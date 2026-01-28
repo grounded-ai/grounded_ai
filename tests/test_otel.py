@@ -24,7 +24,7 @@ from grounded_ai.otel.schemas import (
 @pytest.fixture
 def base_time():
     """Base timestamp for test spans."""
-    return datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    return datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -503,8 +503,8 @@ class TestTraceConverterOTLP:
             {
                 "trace_id": "trace-123",
                 "span_id": "span-1",
-                "start_time": "2024-01-15T10:00:00Z",
-                "end_time": "2024-01-15T10:00:01Z",
+                "start_time": "2026-01-15T10:00:00Z",
+                "end_time": "2026-01-15T10:00:01Z",
                 "attributes": {
                     "openinference.span.kind": "llm",
                     "gen_ai.system": "openai",
@@ -531,8 +531,8 @@ class TestTraceConverterOTLP:
             {
                 "trace_id": "trace-123",
                 "span_id": "span-1",
-                "start_time": "2024-01-15T10:00:00Z",
-                "end_time": "2024-01-15T10:00:01Z",
+                "start_time": "2026-01-15T10:00:00Z",
+                "end_time": "2026-01-15T10:00:01Z",
                 "attributes": {
                     "openinference.span.kind": "tool",
                     "tool.name": "calculator",
@@ -568,8 +568,8 @@ class TestTraceConverterLangSmith:
             "run_type": "chain",
             "inputs": {"input": "What is 2+2?"},
             "outputs": {"output": "4"},
-            "start_time": "2024-01-15T10:00:00Z",
-            "end_time": "2024-01-15T10:00:05Z",
+            "start_time": "2026-01-15T10:00:00Z",
+            "end_time": "2026-01-15T10:00:05Z",
             "child_runs": [
                 {
                     "id": "run-456",
@@ -577,8 +577,8 @@ class TestTraceConverterLangSmith:
                     "run_type": "llm",
                     "inputs": {"messages": []},
                     "outputs": {"generations": [[{"text": "The answer is 4"}]]},
-                    "start_time": "2024-01-15T10:00:01Z",
-                    "end_time": "2024-01-15T10:00:02Z",
+                    "start_time": "2026-01-15T10:00:01Z",
+                    "end_time": "2026-01-15T10:00:02Z",
                     "extra": {"invocation_params": {"model_name": "gpt-4"}},
                     "child_runs": [],
                 }
@@ -600,8 +600,8 @@ class TestTraceConverterLangSmith:
             "run_type": "chain",
             "inputs": {"input": "Search for Python"},
             "outputs": {"output": "Results"},
-            "start_time": "2024-01-15T10:00:00Z",
-            "end_time": "2024-01-15T10:00:05Z",
+            "start_time": "2026-01-15T10:00:00Z",
+            "end_time": "2026-01-15T10:00:05Z",
             "child_runs": [
                 {
                     "id": "run-tool",
@@ -609,8 +609,8 @@ class TestTraceConverterLangSmith:
                     "name": "search",
                     "inputs": {"query": "Python"},
                     "outputs": {"output": "Python is..."},
-                    "start_time": "2024-01-15T10:00:01Z",
-                    "end_time": "2024-01-15T10:00:02Z",
+                    "start_time": "2026-01-15T10:00:01Z",
+                    "end_time": "2026-01-15T10:00:02Z",
                     "child_runs": [],
                 }
             ],
@@ -635,15 +635,15 @@ class TestTraceConverterPhoenix:
             "input": "Hello",
             "output": "Hi there!",
             "status": "success",
-            "start_time": "2024-01-15T10:00:00Z",
-            "end_time": "2024-01-15T10:00:05Z",
+            "start_time": "2026-01-15T10:00:00Z",
+            "end_time": "2026-01-15T10:00:05Z",
             "spans": [
                 {
                     "trace_id": "trace-123",
                     "span_id": "span-1",
                     "span_kind": "llm",
-                    "start_time": "2024-01-15T10:00:01Z",
-                    "end_time": "2024-01-15T10:00:02Z",
+                    "start_time": "2026-01-15T10:00:01Z",
+                    "end_time": "2026-01-15T10:00:02Z",
                     "status_code": "OK",
                     "attributes": {
                         "llm.provider": "openai",
@@ -673,8 +673,8 @@ class TestTraceConverterAutoDetect:
             "run_type": "chain",
             "inputs": {"input": "test"},
             "outputs": {},
-            "start_time": "2024-01-15T10:00:00Z",
-            "end_time": "2024-01-15T10:00:01Z",
+            "start_time": "2026-01-15T10:00:00Z",
+            "end_time": "2026-01-15T10:00:01Z",
             "child_runs": [],
         }
 
@@ -687,8 +687,8 @@ class TestTraceConverterAutoDetect:
             {
                 "trace_id": "trace-123",
                 "span_id": "span-1",
-                "start_time": "2024-01-15T10:00:00Z",
-                "end_time": "2024-01-15T10:00:01Z",
+                "start_time": "2026-01-15T10:00:00Z",
+                "end_time": "2026-01-15T10:00:01Z",
                 "attributes": {
                     "openinference.span.kind": "llm",
                     "gen_ai.system": "openai",
@@ -718,8 +718,8 @@ class TestConvertTracesUtility:
             "run_type": "chain",
             "inputs": {"input": "test"},
             "outputs": {},
-            "start_time": "2024-01-15T10:00:00Z",
-            "end_time": "2024-01-15T10:00:01Z",
+            "start_time": "2026-01-15T10:00:00Z",
+            "end_time": "2026-01-15T10:00:01Z",
             "child_runs": [],
         }
 
@@ -737,8 +737,8 @@ class TestConvertTracesUtility:
                 "run_type": "chain",
                 "inputs": {"input": "test1"},
                 "outputs": {},
-                "start_time": "2024-01-15T10:00:00Z",
-                "end_time": "2024-01-15T10:00:01Z",
+                "start_time": "2026-01-15T10:00:00Z",
+                "end_time": "2026-01-15T10:00:01Z",
                 "child_runs": [],
             },
             {
@@ -746,8 +746,8 @@ class TestConvertTracesUtility:
                 "run_type": "chain",
                 "inputs": {"input": "test2"},
                 "outputs": {},
-                "start_time": "2024-01-15T10:00:02Z",
-                "end_time": "2024-01-15T10:00:03Z",
+                "start_time": "2026-01-15T10:00:02Z",
+                "end_time": "2026-01-15T10:00:03Z",
                 "child_runs": [],
             },
         ]
