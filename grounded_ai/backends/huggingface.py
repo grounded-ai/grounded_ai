@@ -305,10 +305,8 @@ class HuggingFaceBackend(BaseEvaluator):
         except Exception as e:
             # Fallback to a generic error/unparsed response
             logging.error(f"Failed to parse JSON generation: {e}")
-            return target_schema(
-                score=0.0,
-                label="error",
-                confidence=0.0,
-                reasoning=f"Failed to parse JSON. Raw output: {generated_text[:200]}...",
+            return EvaluationError(
+                message=f"Failed to parse JSON generation. Error: {str(e)}",
+                details={"raw_output": generated_text}
             )
 
