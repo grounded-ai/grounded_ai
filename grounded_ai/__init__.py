@@ -4,11 +4,11 @@ from pydantic import BaseModel
 from .base import BaseEvaluator
 from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
 from .otel import (
-    AgentTrace,
-    AgentSpan,
-    LLMSpan,
-    ToolSpan,
-    RetrievalSpan,
+    GenAISpan,
+    GenAIConversation,
+    GenAIMessage,
+    MessagePart,
+    TokenUsage,
     TraceConverter,
     convert_traces,
 )
@@ -89,11 +89,11 @@ __all__ = [
     "EvaluationOutput",
     "EvaluationError",
     # OTel types
-    "AgentTrace",
-    "AgentSpan",
-    "LLMSpan",
-    "ToolSpan",
-    "RetrievalSpan",
+    "GenAIConversation",
+    "GenAISpan",
+    "GenAIMessage",
+    "MessagePart",
+    "TokenUsage",
     "TraceConverter",
     "convert_traces",
 ]

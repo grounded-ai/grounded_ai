@@ -1,290 +1,275 @@
 """
-OpenTelemetry-compliant Agent Trace Schemas.
+OpenTelemetry GenAI Semantic Convention Models.
 
-Provides Pydantic models for representing agent execution traces in a format
-compatible with OpenLLMetry semantic conventions. These schemas serve as a
-universal adapter for agent traces exported from any observability platform.
+Pydantic models for LLM traces following OpenTelemetry GenAI semantic conventions
+as used by Blue Guardrails and other OTel-compatible platforms.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
-
-
-# === Core OTel-Compatible Types ===
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 
-class SpanContext(BaseModel):
-    """OpenTelemetry span context identifying a span within a trace."""
+# === Message Format (GenAI Semantic Convention) ===
 
-    trace_id: str = Field(..., description="Unique identifier for the entire trace")
-    span_id: str = Field(..., description="Unique identifier for this span")
-    parent_span_id: Optional[str] = Field(
-        None, description="Span ID of the parent span, if any"
+
+class MessagePart(BaseModel):
+    """A part within a message (text, tool_call, etc.)."""
+
+    type: Literal["text", "tool_call", "tool_call_response"] = Field(
+        ..., description="Type of message part"
+    )
+    content: Optional[str] = Field(None, description="Text content")
+    
+    # For tool calls
+    id: Optional[str] = Field(None, description="Tool call ID")
+    name: Optional[str] = Field(None, description="Tool/function name")
+    arguments: Optional[Dict[str, Any]] = Field(None, description="Tool arguments")
+    response: Optional[str] = Field(None, description="Tool response")
+
+
+class GenAIMessage(BaseModel):
+    """
+    Message format following OpenTelemetry GenAI semantic conventions.
+    Used in gen_ai.input.messages and gen_ai.output.messages.
+    """
+
+    role: Literal["system", "user", "assistant", "tool"] = Field(
+        ..., description="Message role"
+    )
+    parts: List[MessagePart] = Field(
+        default_factory=list, description="Message parts (text, tool calls, etc.)"
     )
 
 
+# === Token Usage (gen_ai.usage.*) ===
+
+
 class TokenUsage(BaseModel):
-    """Token usage metrics for LLM calls (OpenLLMetry: gen_ai.usage.*)."""
+    """Token usage following gen_ai.usage.* attributes."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    input_tokens: int = Field(0, alias="gen_ai.usage.input_tokens")
-    output_tokens: int = Field(0, alias="gen_ai.usage.output_tokens")
-    total_tokens: int = Field(0)
+    input_tokens: int = Field(0, description="gen_ai.usage.input_tokens")
+    output_tokens: int = Field(0, description="gen_ai.usage.output_tokens")
+    total_tokens: Optional[int] = Field(None, description="Total tokens")
 
     @model_validator(mode="after")
     def compute_total(self):
         """Auto-compute total if not provided."""
-        if self.total_tokens == 0:
+        if self.total_tokens is None:
             self.total_tokens = self.input_tokens + self.output_tokens
         return self
 
 
-# === Message Types ===
+# === GenAI Span (The core LLM trace) ===
 
 
-class Message(BaseModel):
-    """A message in an LLM conversation."""
-
-    role: Literal["system", "user", "assistant", "tool"] = Field(
-        ..., description="Role of the message author"
-    )
-    content: str = Field(..., description="Content of the message")
-    tool_call_id: Optional[str] = Field(
-        None, description="ID of the tool call this message responds to"
-    )
-    name: Optional[str] = Field(None, description="Name for tool messages")
-
-
-class ToolCallRequest(BaseModel):
-    """A tool/function call requested by the LLM."""
-
-    id: str = Field(..., description="Unique identifier for this tool call")
-    name: str = Field(..., description="Name of the tool/function to call")
-    arguments: Dict[str, Any] = Field(
-        default_factory=dict, description="Arguments passed to the tool"
-    )
-
-
-# === Span Types ===
-
-
-class LLMSpan(BaseModel):
+class GenAISpan(BaseModel):
     """
-    Represents a single LLM invocation within an agent trace.
-    Aligned with OpenLLMetry gen_ai.* semantic conventions.
+    A single LLM invocation following OpenTelemetry GenAI semantic conventions.
+    This is what Blue Guardrails and other OTel platforms expect.
     """
 
-    span_type: Literal["llm"] = "llm"
-    context: SpanContext
-
-    # Provider info (OpenLLMetry: gen_ai.system, gen_ai.request.model)
-    provider: str = Field(..., description="LLM provider (openai, anthropic, etc.)")
-    model: str = Field(..., description="Model identifier")
-
-    # Request
-    messages: List[Message] = Field(
-        default_factory=list, description="Input messages to the LLM"
+    # Identity (OpenTelemetry core)
+    trace_id: str = Field(..., description="trace_id")
+    span_id: str = Field(..., description="span_id")
+    parent_span_id: Optional[str] = Field(None, description="Parent span ID")
+    
+    # Span metadata
+    name: str = Field(..., description="Span name (e.g., 'chat gpt-4')")
+    kind: Literal["CLIENT", "INTERNAL", "SERVER"] = Field(
+        "CLIENT", description="Span kind (use CLIENT for LLM calls)"
     )
-    temperature: Optional[float] = Field(None, alias="gen_ai.request.temperature")
-    max_tokens: Optional[int] = Field(None, alias="gen_ai.request.max_tokens")
-
-    # Response
-    completion: Optional[str] = Field(None, description="LLM completion text")
-    tool_calls: List[ToolCallRequest] = Field(
-        default_factory=list, description="Tool calls requested by the LLM"
-    )
-
-    # Metrics
-    usage: TokenUsage = Field(default_factory=TokenUsage)
-    latency_ms: float = Field(..., description="Latency in milliseconds")
-
+    
+    # Timing
+    start_time: datetime = Field(..., description="Span start time")
+    end_time: datetime = Field(..., description="Span end time")
+    
     # Status
-    status: Literal["ok", "error"] = Field(..., description="Span execution status")
-    error: Optional[str] = Field(None, description="Error message if status is error")
-
-    # Timing
-    start_time: datetime = Field(..., description="Span start timestamp")
-    end_time: datetime = Field(..., description="Span end timestamp")
-
-
-class ToolSpan(BaseModel):
-    """Represents a tool/function execution within an agent trace."""
-
-    span_type: Literal["tool"] = "tool"
-    context: SpanContext
-
-    # Tool info
-    tool_name: str = Field(..., description="Name of the executed tool")
-    tool_call_id: str = Field(
-        ..., description="ID linking to the LLM's tool call request"
+    status: Literal["UNSET", "OK", "ERROR"] = Field("UNSET", description="Span status")
+    
+    # GenAI Semantic Convention Attributes (gen_ai.*)
+    gen_ai_system: str = Field(..., alias="gen_ai.system", description="Provider (openai, anthropic, etc.)")
+    gen_ai_request_model: str = Field(..., alias="gen_ai.request.model", description="Model requested")
+    gen_ai_response_model: Optional[str] = Field(None, alias="gen_ai.response.model", description="Model used")
+    gen_ai_response_id: Optional[str] = Field(None, alias="gen_ai.response.id", description="Provider response ID")
+    
+    # Messages (THE KEY ATTRIBUTES)
+    gen_ai_input_messages: List[GenAIMessage] = Field(
+        default_factory=list, alias="gen_ai.input.messages", description="Input messages"
     )
-
-    # Execution
-    arguments: Dict[str, Any] = Field(
-        default_factory=dict, description="Arguments passed to the tool"
+    gen_ai_output_messages: List[GenAIMessage] = Field(
+        default_factory=list, alias="gen_ai.output.messages", description="Output messages"
     )
-    result: Any = Field(None, description="Result returned by the tool")
+    
+    # Usage
+    usage: TokenUsage = Field(default_factory=TokenUsage, description="Token usage")
+    
+    # Optional: Request parameters
+    gen_ai_request_temperature: Optional[float] = Field(None, alias="gen_ai.request.temperature")
+    gen_ai_request_max_tokens: Optional[int] = Field(None, alias="gen_ai.request.max_tokens")
+    gen_ai_response_finish_reasons: Optional[List[str]] = Field(None, alias="gen_ai.response.finish_reasons")
+    
+    # Optional: Conversation grouping
+    gen_ai_conversation_id: Optional[str] = Field(None, alias="gen_ai.conversation.id")
+    
+    # Additional attributes (catch-all for platform-specific data)
+    attributes: Dict[str, Any] = Field(default_factory=dict, description="Additional span attributes")
 
-    # Status
-    status: Literal["ok", "error"] = Field(..., description="Tool execution status")
-    error: Optional[str] = Field(None, description="Error message if status is error")
-    latency_ms: float = Field(..., description="Execution latency in milliseconds")
-
-    # Timing
-    start_time: datetime = Field(..., description="Execution start timestamp")
-    end_time: datetime = Field(..., description="Execution end timestamp")
-
-
-class RetrievalSpan(BaseModel):
-    """Represents a retrieval/RAG operation within an agent trace."""
-
-    span_type: Literal["retrieval"] = "retrieval"
-    context: SpanContext
-
-    # Query
-    query: str = Field(..., description="The retrieval query")
-
-    # Results
-    documents: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Retrieved documents"
-    )
-    scores: List[float] = Field(
-        default_factory=list, description="Relevance scores for retrieved documents"
-    )
-
-    # Metadata
-    vector_store: Optional[str] = Field(None, description="Vector store identifier")
-    top_k: Optional[int] = Field(None, description="Number of documents requested")
-
-    # Status
-    status: Literal["ok", "error"] = Field(..., description="Retrieval status")
-    error: Optional[str] = Field(None, description="Error message if status is error")
-    latency_ms: float = Field(..., description="Retrieval latency in milliseconds")
-
-    # Timing
-    start_time: datetime = Field(..., description="Retrieval start timestamp")
-    end_time: datetime = Field(..., description="Retrieval end timestamp")
-
-
-# Union type for all span variants
-AgentSpan = Union[LLMSpan, ToolSpan, RetrievalSpan]
-
-
-# === Top-Level Agent Trace ===
-
-
-class AgentTrace(BaseModel):
-    """
-    Complete agent execution trace.
-
-    This is the unified model that traces from any source (LangSmith, Phoenix,
-    OpenLLMetry, etc.) get converted into for evaluation. Spans are guaranteed
-    to be in chronological order.
-    """
-
-    # Identity
-    trace_id: str = Field(..., description="Unique identifier for this trace")
-
-    # Agent metadata
-    agent_name: Optional[str] = Field(None, description="Name of the agent")
-    agent_version: Optional[str] = Field(None, description="Version of the agent")
-
-    # Input/Output
-    input: str = Field(..., description="Original user request/task")
-    output: Optional[str] = Field(None, description="Final agent output")
-    status: Literal["success", "error", "timeout"] = Field(
-        ..., description="Overall trace status"
-    )
-
-    # The trace - ordered list of spans
-    spans: List[AgentSpan] = Field(
-        default_factory=list, description="Chronologically ordered spans"
-    )
-
-    # Timing
-    start_time: datetime = Field(..., description="Trace start timestamp")
-    end_time: datetime = Field(..., description="Trace end timestamp")
-
-    # Arbitrary metadata for evaluation context
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional trace metadata"
-    )
-
-    @model_validator(mode="after")
-    def ensure_chronological_order(self):
-        """Guarantee spans are always in chronological order."""
-        self.spans = sorted(self.spans, key=lambda s: s.start_time)
-        return self
-
-    # === Computed Properties for Evaluation ===
+    class Config:
+        populate_by_name = True
 
     @computed_field
     @property
-    def total_latency_ms(self) -> float:
-        """Total trace duration in milliseconds."""
+    def latency_ms(self) -> float:
+        """Span duration in milliseconds."""
         return (self.end_time - self.start_time).total_seconds() * 1000
+
+
+# === Conversation (Multiple spans grouped) ===
+
+
+class GenAIConversation(BaseModel):
+    """
+    A conversation is a collection of GenAI spans grouped together.
+    Blue Guardrails groups spans by gen_ai.conversation.id or trace_id.
+    """
+
+    # Identity
+    conversation_id: str = Field(..., description="Conversation/trace ID")
+    
+    # Spans in chronological order
+    spans: List[GenAISpan] = Field(default_factory=list, description="LLM spans")
+    
+    # Metadata
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Conversation metadata")
+
+    @model_validator(mode="after")
+    def ensure_chronological_order(self):
+        """Ensure spans are sorted chronologically."""
+        self.spans = sorted(self.spans, key=lambda s: s.start_time)
+        return self
 
     @computed_field
     @property
     def total_tokens(self) -> TokenUsage:
-        """Aggregate token usage across all LLM spans."""
+        """Total tokens across all spans."""
         usage = TokenUsage()
         for span in self.spans:
-            if isinstance(span, LLMSpan):
-                usage.input_tokens += span.usage.input_tokens
-                usage.output_tokens += span.usage.output_tokens
-                usage.total_tokens += span.usage.total_tokens
+            usage.input_tokens += span.usage.input_tokens
+            usage.output_tokens += span.usage.output_tokens
+        usage.compute_total()
         return usage
 
     @computed_field
     @property
-    def llm_call_count(self) -> int:
-        """Number of LLM calls in the trace."""
-        return sum(1 for s in self.spans if s.span_type == "llm")
+    def total_latency_ms(self) -> float:
+        """Total conversation duration."""
+        if not self.spans:
+            return 0.0
+        start = min(s.start_time for s in self.spans)
+        end = max(s.end_time for s in self.spans)
+        return (end - start).total_seconds() * 1000
 
-    @computed_field
-    @property
-    def tool_call_count(self) -> int:
-        """Number of tool calls in the trace."""
-        return sum(1 for s in self.spans if s.span_type == "tool")
-
-    # === Helper Methods for Evaluation ===
-
-    def get_llm_spans(self) -> List[LLMSpan]:
-        """Get all LLM spans in chronological order."""
-        return [s for s in self.spans if s.span_type == "llm"]
-
-    def get_tool_spans(self) -> List[ToolSpan]:
-        """Get all tool spans in chronological order."""
-        return [s for s in self.spans if s.span_type == "tool"]
-
-    def get_retrieval_spans(self) -> List[RetrievalSpan]:
-        """Get all retrieval spans in chronological order."""
-        return [s for s in self.spans if s.span_type == "retrieval"]
+    def get_all_messages(self) -> List[GenAIMessage]:
+        """Get all messages in chronological order."""
+        messages = []
+        for span in self.spans:
+            messages.extend(span.gen_ai_input_messages)
+            messages.extend(span.gen_ai_output_messages)
+        return messages
 
     def get_reasoning_chain(self) -> List[str]:
-        """Extract the chain of LLM completions for evaluation."""
-        return [s.completion for s in self.get_llm_spans() if s.completion]
-
-    def get_tool_call_pairs(self) -> List[Dict[str, Any]]:
         """
-        Get tool calls with their arguments and results.
-        Useful for evaluating tool parameterization correctness.
+        Extract the chronological chain of LLM reasoning.
+        
+        Returns a list of assistant messages showing the agent's thought process.
+        Useful for analyzing decision-making logic and debugging unexpected behavior.
+        
+        Example:
+            ["I need to search for weather data",
+             "Based on the results, Paris is 18°C",
+             "The capital of France is Paris and it's currently 18°C"]
         """
-        return [
-            {
-                "name": s.tool_name,
-                "arguments": s.arguments,
-                "result": s.result,
-                "status": s.status,
-                "error": s.error,
-            }
-            for s in self.get_tool_spans()
-        ]
-
-    def get_error_spans(self) -> List[AgentSpan]:
-        """Get all spans that resulted in errors."""
-        return [s for s in self.spans if s.status == "error"]
+        reasoning = []
+        for span in self.spans:  # Already sorted chronologically
+            # Extract assistant messages from output
+            for message in span.gen_ai_output_messages:
+                if message.role == "assistant":
+                    # Get text content from parts
+                    for part in message.parts:
+                        if part.type == "text" and part.content:
+                            reasoning.append(part.content)
+        return reasoning
+    
+    def get_full_conversation(self) -> List[Dict[str, str]]:
+        """
+        Get the complete conversation in chronological order.
+        
+        Returns all messages (system, user, assistant, tool) as simple dicts.
+        Useful for replaying the entire conversation or feeding to another LLM.
+        
+        Example:
+            [{"role": "system", "content": "You are helpful"},
+             {"role": "user", "content": "What's the weather?"},
+             {"role": "assistant", "content": "Let me check..."},
+             {"role": "tool", "content": "{temp: 18}"},
+             {"role": "assistant", "content": "It's 18°C"}]
+        """
+        conversation = []
+        for span in self.spans:
+            # Input messages
+            for message in span.gen_ai_input_messages:
+                for part in message.parts:
+                    if part.type == "text" and part.content:
+                        conversation.append({
+                            "role": message.role,
+                            "content": part.content
+                        })
+            # Output messages
+            for message in span.gen_ai_output_messages:
+                for part in message.parts:
+                    if part.type == "text" and part.content:
+                        conversation.append({
+                            "role": message.role,
+                            "content": part.content
+                        })
+        return conversation
+    
+    def get_tool_usage_summary(self) -> List[Dict[str, Any]]:
+        """
+        Extract all tool calls and their results chronologically.
+        
+        Useful for evaluating whether the agent used tools correctly.
+        
+        Example:
+            [{"tool": "get_weather", 
+              "arguments": {"location": "Paris"},
+              "result": "18°C sunny",
+              "span_id": "abc123"}]
+        """
+        tool_calls = []
+        for span in self.spans:
+            # Find tool calls in output messages
+            for message in span.gen_ai_output_messages:
+                if message.role == "assistant":
+                    for part in message.parts:
+                        if part.type == "tool_call":
+                            tool_calls.append({
+                                "tool": part.name,
+                                "arguments": part.arguments,
+                                "call_id": part.id,
+                                "span_id": span.span_id
+                            })
+            
+            # Find tool responses in input messages
+            for message in span.gen_ai_input_messages:
+                if message.role == "tool":
+                    for part in message.parts:
+                        if part.type == "tool_call_response":
+                            # Match with the call
+                            for tc in tool_calls:
+                                if tc.get("call_id") == part.id:
+                                    tc["result"] = part.response
+        
+        return tool_calls
