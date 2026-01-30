@@ -1,14 +1,15 @@
-import sys
 import json
-import pytest
+import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Pre-mock anthropic module
 mock_anthropic_module = MagicMock()
 mock_anthropic_module.__spec__ = MagicMock()
 sys.modules["anthropic"] = mock_anthropic_module
 
-from grounded_ai import Evaluator, EvaluationOutput, EvaluationInput  # noqa: E402
+from grounded_ai import EvaluationInput, EvaluationOutput, Evaluator  # noqa: E402
 from grounded_ai.backends.anthropic import AnthropicBackend  # noqa: E402
 
 

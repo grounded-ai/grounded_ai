@@ -1,6 +1,7 @@
 import sys
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Pre-mock openai module to ensure tests run even if package isn't installed
 mock_openai_module = MagicMock()
@@ -8,8 +9,12 @@ mock_openai_module.__spec__ = MagicMock()
 sys.modules["openai"] = mock_openai_module
 
 from grounded_ai import Evaluator  # noqa: E402
-from grounded_ai.schemas import EvaluationInput, EvaluationOutput, EvaluationError  # noqa: E402
 from grounded_ai.backends.openai import OpenAIBackend  # noqa: E402
+from grounded_ai.schemas import (  # noqa: E402
+    EvaluationError,
+    EvaluationInput,
+    EvaluationOutput,
+)
 
 
 class TestOpenAIBackend:

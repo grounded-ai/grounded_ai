@@ -1,14 +1,15 @@
 import sys
-import pytest
-from unittest.mock import MagicMock, patch
 
 # Pre-mock dependencies before imports
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 if TYPE_CHECKING:
     from grounded_ai.backends.grounded_ai_slm.backend import (
-        GroundedAISLMBackend,
         EvalMode,
+        GroundedAISLMBackend,
     )
 else:
     # We will import these dynamically in the fixture to allow mocking imports
@@ -39,8 +40,10 @@ class TestSLMBackend:
         with patch.dict(sys.modules, mock_modules):
             # Now safe to import
             from grounded_ai.backends.grounded_ai_slm.backend import (
-                GroundedAISLMBackend as GB,
                 EvalMode as EM,
+            )
+            from grounded_ai.backends.grounded_ai_slm.backend import (
+                GroundedAISLMBackend as GB,
             )
 
             # Inject into global namespace for tests to use (or attach to self/fixture)

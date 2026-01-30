@@ -25,7 +25,6 @@ class TraceConverter:
     Supported sources:
     - OTLP/OpenLLMetry: Raw OpenTelemetry spans with gen_ai.* attributes
     - LangSmith: LangChain's observability platform exports
-    - Phoenix: Arize Phoenix trace exports
     """
 
     @classmethod
@@ -77,30 +76,6 @@ class TraceConverter:
             metadata=run.get("extra", {}),
         )
 
-    @classmethod
-    def from_phoenix(cls, trace: Dict[str, Any]) -> GenAIConversation:
-        """
-        Convert an Arize Phoenix trace export.
-        """
-        gen_ai_spans: List[GenAISpan] = []
-        spans_list = trace.get("spans", [])
-
-        for span in spans_list:
-            # Only interested in LLM spans for GenAI Schema
-            # (Vector retrieval can be simulated as system context or looked at later)
-            if (
-                span.get("span_kind") == "LLM"
-                or span.get("attributes", {}).get("openinference.span.kind") == "LLM"
-            ):
-                parsed = cls._parse_phoenix_span(span)
-                if parsed:
-                    gen_ai_spans.append(parsed)
-
-        return GenAIConversation(
-            conversation_id=trace.get("trace_id", "unknown"),
-            spans=gen_ai_spans,
-        )
-
     # === Private Parsers ===
 
     @classmethod
@@ -108,20 +83,15 @@ class TraceConverter:
         """Parse OTLP span to GenAISpan."""
         attrs = span.get("attributes", {})
 
-        # We generally filter for spans that have gen_ai.system or openinference.span.kind=LLM
-        if not (
-            attrs.get("gen_ai.system") or attrs.get("openinference.span.kind") == "LLM"
-        ):
-            # In strict GenAI convention, we might only care about LLM calls
+        # We generally filter for spans that have gen_ai.system
+        # Removed OpenInference/Arize support
+        if not attrs.get("gen_ai.system"):
             return None
 
         start_time = cls._parse_timestamp(span.get("start_time"))
         end_time = cls._parse_timestamp(span.get("end_time"))
 
-        status_code = span.get("status", {}).get(
-            "code", 1
-        )  # 1=OK normally in OTLP JSON? Check standard.
-        # Actually OTLP JSON: status: { code: 1 (OK), 2 (ERROR) }
+        status_code = span.get("status", {}).get("code", 1)
         status = "OK"
         if status_code == 2:
             status = "ERROR"
@@ -143,12 +113,8 @@ class TraceConverter:
             start_time=start_time,
             end_time=end_time,
             status=status,
-            gen_ai_system=attrs.get("gen_ai.system")
-            or attrs.get("llm.provider")
-            or "unknown",
-            gen_ai_request_model=attrs.get("gen_ai.request.model")
-            or attrs.get("llm.model_name")
-            or "unknown",
+            gen_ai_system=attrs.get("gen_ai.system") or "unknown",
+            gen_ai_request_model=attrs.get("gen_ai.request.model") or "unknown",
             gen_ai_response_model=attrs.get("gen_ai.response.model"),
             gen_ai_input_messages=cls._parse_otlp_messages(attrs, "input"),
             gen_ai_output_messages=cls._parse_otlp_messages(attrs, "output"),
@@ -237,44 +203,6 @@ class TraceConverter:
             attributes=extra,
         )
 
-    @classmethod
-    def _parse_phoenix_span(cls, span: Dict[str, Any]) -> GenAISpan:
-        attrs = span.get("attributes", {})
-        start_time = cls._parse_timestamp(span.get("start_time"))
-        end_time = cls._parse_timestamp(span.get("end_time"))
-
-        # Phoenix attributes mapping
-        # llm.input_messages is typically a list of dicts or JSON string
-        input_msgs = cls._parse_phoenix_messages(attrs, "input")
-        output_msgs = cls._parse_phoenix_messages(attrs, "output")
-
-        return GenAISpan(
-            trace_id=span.get("trace_id", ""),
-            span_id=span.get("span_id", ""),
-            parent_span_id=span.get("parent_id"),
-            name=span.get("name", "llm"),
-            kind="CLIENT",
-            start_time=start_time,
-            end_time=end_time,
-            status="OK"
-            if span.get("status", {}).get("status_code") == "OK"
-            else "ERROR",
-            gen_ai_system="unknown",  # Phoenix often doesn't explicitly state provider separately from model
-            gen_ai_request_model=attrs.get("llm.model_name", "unknown"),
-            gen_ai_input_messages=input_msgs,
-            gen_ai_output_messages=output_msgs,
-            usage=TokenUsage(
-                input_tokens=attrs.get("llm.token_count.prompt", 0),
-                output_tokens=attrs.get("llm.token_count.completion", 0),
-            ),
-            gen_ai_request_temperature=attrs.get("llm.invocation_parameters", {}).get(
-                "temperature"
-            )
-            if isinstance(attrs.get("llm.invocation_parameters"), dict)
-            else None,
-            attributes=attrs,
-        )
-
     # === Helpers ===
 
     @classmethod
@@ -309,9 +237,7 @@ class TraceConverter:
                 # Parse list of dicts to GenAIMessages
                 return cls._parse_list_of_message_dicts(val)
 
-        # 2. Fallback to Phoenix/OpenInference flattened attributes
-        # (reuse phoenix parser logic logic, but accessible here)
-        return cls._parse_phoenix_messages(attrs, direction)
+        return []
 
     @staticmethod
     def _parse_list_of_message_dicts(msgs: List[Dict]) -> List[GenAIMessage]:
@@ -324,8 +250,6 @@ class TraceConverter:
             if "parts" in m and isinstance(m["parts"], list):
                 for p in m["parts"]:
                     # Convert dict to MessagePart if needed
-                    # Handle strict validation or loose dict? Pydantic handles loose dicts often
-                    # We map fields manually to be safe against extra fields
                     if isinstance(p, dict):
                         parts.append(
                             MessagePart(
@@ -338,7 +262,7 @@ class TraceConverter:
                             )
                         )
 
-            # 2. Simplified 'content' string (fallback/legacy)
+            # 2. Simplified 'content' string
             elif "content" in m:
                 content = m.get("content")
                 if content:
@@ -388,35 +312,6 @@ class TraceConverter:
 
             result.append(GenAIMessage(role=role, parts=parts))
         return result
-
-    @staticmethod
-    def _parse_phoenix_messages(attrs: Dict, direction: str) -> List[GenAIMessage]:
-        # Phoenix uses attributes like 'llm.input_messages.0.message.content'
-        # Need to iterate keys to reconstruct list
-        messages = []
-        prefix = "llm.input_messages" if direction == "input" else "llm.output_messages"
-
-        # Simple heuristic: look for index 0..N
-        i = 0
-        while True:
-            role_key = f"{prefix}.{i}.message.role"
-            content_key = f"{prefix}.{i}.message.content"
-
-            if role_key not in attrs and content_key not in attrs:
-                break
-
-            default_role = "user" if direction == "input" else "assistant"
-            role = attrs.get(role_key, default_role)
-            content = attrs.get(content_key, "")
-
-            messages.append(
-                GenAIMessage(
-                    role=role, parts=[MessagePart(type="text", content=content)]
-                )
-            )
-            i += 1
-
-        return messages
 
 
 def gens_to_message(gen: Dict) -> Optional[GenAIMessage]:

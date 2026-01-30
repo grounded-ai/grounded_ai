@@ -1,7 +1,8 @@
-import pytest
-from grounded_ai import Evaluator
-
 import importlib.util
+
+import pytest
+
+from grounded_ai import Evaluator
 
 HAS_DEPS = (
     importlib.util.find_spec("transformers") is not None
@@ -45,6 +46,7 @@ class TestHuggingFaceBackend:
     def test_custom_system_prompt_mocks(self):
         """Test system prompt injection with mocks."""
         from unittest.mock import MagicMock, patch
+
         from grounded_ai.schemas import EvaluationInput
 
         # Mock pipeline
@@ -83,6 +85,7 @@ class TestHuggingFaceBackend:
     def test_custom_input_output_schemas(self):
         """Test overriding schemas for HF backend."""
         from unittest.mock import MagicMock, patch
+
         from pydantic import BaseModel
 
         class CustomInput(BaseModel):
