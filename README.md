@@ -178,6 +178,28 @@ print(result.security_risk) # False
 print(result.suggestions)   # ['Add type hints', ...]
 ```
 
+### 6. Agent Trace Evaluation (OpenTelemetry)
+
+Grounded AI natively supports parsing and evaluating agent traces from **OpenTelemetry (OTLP)** and **LangSmith**. We follow the *OpenTelemetry GenAI Semantic Conventions*.
+
+```python
+from grounded_ai.otel import TraceConverter
+
+# 1. Parse raw trace from OTLP or LangSmith
+# (Pass in your raw trace dict or span list)
+conversation = TraceConverter.from_otlp([raw_otlp_span])
+# OR
+conversation = TraceConverter.from_langsmith(raw_langsmith_run)
+
+# 2. Extract conversation history for evaluation
+messages = conversation.get_full_conversation()
+# [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+
+# 3. Evaluate using the Evaluator
+evaluator = Evaluator("openai/gpt-4o")
+# ... use messages in your prompt ...
+```
+
 ## API Reference
 
 ### `Evaluator` Factory

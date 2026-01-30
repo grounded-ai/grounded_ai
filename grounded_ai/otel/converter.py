@@ -251,13 +251,24 @@ class TraceConverter:
                 for p in m["parts"]:
                     # Convert dict to MessagePart if needed
                     if isinstance(p, dict):
+                        args = p.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except ValueError:
+                                # Coerce non-JSON string to dict wrap if necessary
+                                if args:
+                                    args = {"raw_arguments": args}
+                                else:
+                                    args = None
+
                         parts.append(
                             MessagePart(
                                 type=p.get("type", "text"),
                                 content=p.get("content"),
                                 id=p.get("id"),
                                 name=p.get("name"),
-                                arguments=p.get("arguments"),
+                                arguments=args,
                                 response=p.get("response"),
                             )
                         )
