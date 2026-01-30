@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
-
 # === Message Format (GenAI Semantic Convention) ===
 
 
@@ -21,7 +20,7 @@ class MessagePart(BaseModel):
         ..., description="Type of message part"
     )
     content: Optional[str] = Field(None, description="Text content")
-    
+
     # For tool calls
     id: Optional[str] = Field(None, description="Tool call ID")
     name: Optional[str] = Field(None, description="Tool/function name")
@@ -74,47 +73,67 @@ class GenAISpan(BaseModel):
     trace_id: str = Field(..., description="trace_id")
     span_id: str = Field(..., description="span_id")
     parent_span_id: Optional[str] = Field(None, description="Parent span ID")
-    
+
     # Span metadata
     name: str = Field(..., description="Span name (e.g., 'chat gpt-4')")
     kind: Literal["CLIENT", "INTERNAL", "SERVER"] = Field(
         "CLIENT", description="Span kind (use CLIENT for LLM calls)"
     )
-    
+
     # Timing
     start_time: datetime = Field(..., description="Span start time")
     end_time: datetime = Field(..., description="Span end time")
-    
+
     # Status
     status: Literal["UNSET", "OK", "ERROR"] = Field("UNSET", description="Span status")
-    
+
     # GenAI Semantic Convention Attributes (gen_ai.*)
-    gen_ai_system: str = Field(..., alias="gen_ai.system", description="Provider (openai, anthropic, etc.)")
-    gen_ai_request_model: str = Field(..., alias="gen_ai.request.model", description="Model requested")
-    gen_ai_response_model: Optional[str] = Field(None, alias="gen_ai.response.model", description="Model used")
-    gen_ai_response_id: Optional[str] = Field(None, alias="gen_ai.response.id", description="Provider response ID")
-    
+    gen_ai_system: str = Field(
+        ..., alias="gen_ai.system", description="Provider (openai, anthropic, etc.)"
+    )
+    gen_ai_request_model: str = Field(
+        ..., alias="gen_ai.request.model", description="Model requested"
+    )
+    gen_ai_response_model: Optional[str] = Field(
+        None, alias="gen_ai.response.model", description="Model used"
+    )
+    gen_ai_response_id: Optional[str] = Field(
+        None, alias="gen_ai.response.id", description="Provider response ID"
+    )
+
     # Messages (THE KEY ATTRIBUTES)
     gen_ai_input_messages: List[GenAIMessage] = Field(
-        default_factory=list, alias="gen_ai.input.messages", description="Input messages"
+        default_factory=list,
+        alias="gen_ai.input.messages",
+        description="Input messages",
     )
     gen_ai_output_messages: List[GenAIMessage] = Field(
-        default_factory=list, alias="gen_ai.output.messages", description="Output messages"
+        default_factory=list,
+        alias="gen_ai.output.messages",
+        description="Output messages",
     )
-    
+
     # Usage
     usage: TokenUsage = Field(default_factory=TokenUsage, description="Token usage")
-    
+
     # Optional: Request parameters
-    gen_ai_request_temperature: Optional[float] = Field(None, alias="gen_ai.request.temperature")
-    gen_ai_request_max_tokens: Optional[int] = Field(None, alias="gen_ai.request.max_tokens")
-    gen_ai_response_finish_reasons: Optional[List[str]] = Field(None, alias="gen_ai.response.finish_reasons")
-    
+    gen_ai_request_temperature: Optional[float] = Field(
+        None, alias="gen_ai.request.temperature"
+    )
+    gen_ai_request_max_tokens: Optional[int] = Field(
+        None, alias="gen_ai.request.max_tokens"
+    )
+    gen_ai_response_finish_reasons: Optional[List[str]] = Field(
+        None, alias="gen_ai.response.finish_reasons"
+    )
+
     # Optional: Conversation grouping
     gen_ai_conversation_id: Optional[str] = Field(None, alias="gen_ai.conversation.id")
-    
+
     # Additional attributes (catch-all for platform-specific data)
-    attributes: Dict[str, Any] = Field(default_factory=dict, description="Additional span attributes")
+    attributes: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional span attributes"
+    )
 
     class Config:
         populate_by_name = True
@@ -137,12 +156,14 @@ class GenAIConversation(BaseModel):
 
     # Identity
     conversation_id: str = Field(..., description="Conversation/trace ID")
-    
+
     # Spans in chronological order
     spans: List[GenAISpan] = Field(default_factory=list, description="LLM spans")
-    
+
     # Metadata
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Conversation metadata")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Conversation metadata"
+    )
 
     @model_validator(mode="after")
     def ensure_chronological_order(self):
@@ -182,10 +203,10 @@ class GenAIConversation(BaseModel):
     def get_reasoning_chain(self) -> List[str]:
         """
         Extract the chronological chain of LLM reasoning.
-        
+
         Returns a list of assistant messages showing the agent's thought process.
         Useful for analyzing decision-making logic and debugging unexpected behavior.
-        
+
         Example:
             ["I need to search for weather data",
              "Based on the results, Paris is 18°C",
@@ -201,14 +222,14 @@ class GenAIConversation(BaseModel):
                         if part.type == "text" and part.content:
                             reasoning.append(part.content)
         return reasoning
-    
+
     def get_full_conversation(self) -> List[Dict[str, str]]:
         """
         Get the complete conversation in chronological order.
-        
+
         Returns all messages (system, user, assistant, tool) as simple dicts.
         Useful for replaying the entire conversation or feeding to another LLM.
-        
+
         Example:
             [{"role": "system", "content": "You are helpful"},
              {"role": "user", "content": "What's the weather?"},
@@ -222,28 +243,26 @@ class GenAIConversation(BaseModel):
             for message in span.gen_ai_input_messages:
                 for part in message.parts:
                     if part.type == "text" and part.content:
-                        conversation.append({
-                            "role": message.role,
-                            "content": part.content
-                        })
+                        conversation.append(
+                            {"role": message.role, "content": part.content}
+                        )
             # Output messages
             for message in span.gen_ai_output_messages:
                 for part in message.parts:
                     if part.type == "text" and part.content:
-                        conversation.append({
-                            "role": message.role,
-                            "content": part.content
-                        })
+                        conversation.append(
+                            {"role": message.role, "content": part.content}
+                        )
         return conversation
-    
+
     def get_tool_usage_summary(self) -> List[Dict[str, Any]]:
         """
         Extract all tool calls and their results chronologically.
-        
+
         Useful for evaluating whether the agent used tools correctly.
-        
+
         Example:
-            [{"tool": "get_weather", 
+            [{"tool": "get_weather",
               "arguments": {"location": "Paris"},
               "result": "18°C sunny",
               "span_id": "abc123"}]
@@ -255,13 +274,15 @@ class GenAIConversation(BaseModel):
                 if message.role == "assistant":
                     for part in message.parts:
                         if part.type == "tool_call":
-                            tool_calls.append({
-                                "tool": part.name,
-                                "arguments": part.arguments,
-                                "call_id": part.id,
-                                "span_id": span.span_id
-                            })
-            
+                            tool_calls.append(
+                                {
+                                    "tool": part.name,
+                                    "arguments": part.arguments,
+                                    "call_id": part.id,
+                                    "span_id": span.span_id,
+                                }
+                            )
+
             # Find tool responses in input messages
             for message in span.gen_ai_input_messages:
                 if message.role == "tool":
@@ -271,5 +292,5 @@ class GenAIConversation(BaseModel):
                             for tc in tool_calls:
                                 if tc.get("call_id") == part.id:
                                     tc["result"] = part.response
-        
+
         return tool_calls

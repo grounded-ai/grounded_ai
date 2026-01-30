@@ -1,8 +1,9 @@
 from typing import Type, Union
+
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationInput, EvaluationOutput, EvaluationError
+from ..schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 try:
     from transformers import pipeline
@@ -91,7 +92,7 @@ class HuggingFaceBackend(BaseEvaluator):
             self.system_prompt
             or "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
         )
-        
+
         # Some chat templates don't support system prompts, but standard chat models usually do.
         messages.append({"role": "system", "content": system_prompt})
 
@@ -126,4 +127,3 @@ class HuggingFaceBackend(BaseEvaluator):
         return output_schema(
             score=0.0, label="generated_text", confidence=0.0, reasoning=generated_text
         )
-

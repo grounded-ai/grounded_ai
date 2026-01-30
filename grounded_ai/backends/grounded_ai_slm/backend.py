@@ -1,13 +1,13 @@
+import logging
 import os
 import re
-import logging
-from typing import Optional, Type, Union
-from pydantic import BaseModel
-from jinja2 import Template
 from enum import Enum
+from typing import Optional, Type, Union
 
 import torch
+from jinja2 import Template
 from peft import PeftConfig, PeftModel
+from pydantic import BaseModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -17,12 +17,11 @@ from transformers import (
 
 from ...base import BaseEvaluator
 from ...schemas import EvaluationInput, EvaluationOutput
-
 from .prompts import (
+    HALLUCINATION_EVAL_BASE,
+    RAG_RELEVANCE_EVAL_BASE,
     SYSTEM_PROMPT_BASE,
     TOXICITY_EVAL_BASE,
-    RAG_RELEVANCE_EVAL_BASE,
-    HALLUCINATION_EVAL_BASE,
 )
 
 # Constants
@@ -66,7 +65,7 @@ class GroundedAISLMBackend(BaseEvaluator):
         self.task = None
         if eval_mode:
             self.set_eval_mode(eval_mode)
-            
+
         self.tokenizer = None
         self.base_model = None
         self.merged_model = None
@@ -137,7 +136,9 @@ class GroundedAISLMBackend(BaseEvaluator):
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> BaseModel:
         if not self.task:
-             raise ValueError("Eval mode not set. Please provide 'eval_mode' in init or call set_eval_mode().")
+            raise ValueError(
+                "Eval mode not set. Please provide 'eval_mode' in init or call set_eval_mode()."
+            )
 
         # 3. Format Prompt
         prompt = self._format_prompt(input_data)
@@ -157,7 +158,14 @@ class GroundedAISLMBackend(BaseEvaluator):
         }
 
         # Explicitly allow-list generation arguments to prevent pollution from wrapper kwargs
-        allowed_gen_args = {"temperature", "max_new_tokens", "do_sample", "top_p", "top_k", "repetition_penalty"}
+        allowed_gen_args = {
+            "temperature",
+            "max_new_tokens",
+            "do_sample",
+            "top_p",
+            "top_k",
+            "repetition_penalty",
+        }
         for k, v in kwargs.items():
             if k in allowed_gen_args:
                 generation_args[k] = v

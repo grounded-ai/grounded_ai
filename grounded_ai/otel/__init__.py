@@ -1,8 +1,8 @@
 from .converter import TraceConverter, convert_traces
 from .schemas import (
-    GenAISpan,
     GenAIConversation,
     GenAIMessage,
+    GenAISpan,
     MessagePart,
     TokenUsage,
 )

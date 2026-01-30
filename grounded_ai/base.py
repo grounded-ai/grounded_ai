@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Type, Any, Union, Dict
+from typing import Any, Dict, Type, Union
+
 from pydantic import BaseModel
 
-from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
+from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 
 class BaseEvaluator(ABC):

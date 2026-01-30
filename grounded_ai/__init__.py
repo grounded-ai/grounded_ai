@@ -1,17 +1,19 @@
-from typing import Type, Union, Any, Dict
+from typing import Any, Dict, Type, Union
+
 from pydantic import BaseModel
 
 from .base import BaseEvaluator
-from .schemas import EvaluationInput, EvaluationOutput, EvaluationError
 from .otel import (
-    GenAISpan,
     GenAIConversation,
     GenAIMessage,
+    GenAISpan,
     MessagePart,
     TokenUsage,
     TraceConverter,
     convert_traces,
 )
+from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
+
 # Import backends lazily or generally
 # For now, we import locally within the factory to avoid heavy dependency loading if unused
 

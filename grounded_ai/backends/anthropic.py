@@ -1,6 +1,7 @@
-from typing import Any, Type, Union, Optional
-import os
 import json
+import os
+from typing import Any, Optional, Type, Union
+
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
@@ -86,7 +87,7 @@ class AnthropicBackend(BaseEvaluator):
             return schema
 
         json_schema = _enforce_strict_schema(json_schema)
-        
+
         # Merge init kwargs with runtime kwargs (runtime overrides init)
         request_kwargs = {**self.kwargs, **kwargs}
 

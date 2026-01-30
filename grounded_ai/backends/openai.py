@@ -1,5 +1,6 @@
-from typing import Any, Type, Union, Optional
 import os
+from typing import Any, Optional, Type, Union
+
 from pydantic import BaseModel
 
 from ..base import BaseEvaluator
