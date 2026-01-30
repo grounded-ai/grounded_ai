@@ -1,6 +1,7 @@
-
 import os
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel
+
 from grounded_ai import Evaluator
 from grounded_ai.otel import TraceConverter
 
@@ -30,11 +31,15 @@ trace_data = [
                     "role": "assistant",
                     "parts": [
                         {"type": "text", "content": "I should checks the weather api."},
-                        {"type": "tool_call", "name": "get_weather", "arguments": '{"city": "Tokyo"}'}
-                    ]
+                        {
+                            "type": "tool_call",
+                            "name": "get_weather",
+                            "arguments": '{"city": "Tokyo"}',
+                        },
+                    ],
                 }
-            ]
-        }
+            ],
+        },
     },
     # --- Turn 2: Observation & Response ---
     {
@@ -52,14 +57,17 @@ trace_data = [
             "gen_ai.input.messages": [
                 {"role": "user", "content": "What is the weather in Tokyo?"},
                 {"role": "assistant", "content": "I should checks the weather api."},
-                {"role": "tool", "content": "15 degrees Celsius, Sunny"}
+                {"role": "tool", "content": "15 degrees Celsius, Sunny"},
             ],
             # Output: Final Answer
             "gen_ai.output.messages": [
-                {"role": "assistant", "content": "The weather in Tokyo is 15 degrees Celsius and Sunny."}
-            ]
-        }
-    }
+                {
+                    "role": "assistant",
+                    "content": "The weather in Tokyo is 15 degrees Celsius and Sunny.",
+                }
+            ],
+        },
+    },
 ]
 
 # 2. Convert Trace
@@ -73,22 +81,24 @@ print(f"Spans Found: {len(conversation.spans)}")
 print("\n--- Agent Reasoning Chain ---")
 reasoning = conversation.get_reasoning_chain()
 for i, step in enumerate(reasoning):
-    print(f"Step {i+1}: {step}")
+    print(f"Step {i + 1}: {step}")
 
 # 4. Evaluate Final Response faithfulness to Tools
 # We will use the output of the *last* span and the *tool parameters* from the first span.
 if "OPENAI_API_KEY" not in os.environ:
     if "OPENAI_API_KEY" not in os.environ:
-         os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
+        os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
+
 
 class AgentEvaluation(BaseModel):
     plan_followed: bool
     final_answer_correct: bool
 
+
 print("\n--- Evaluating Agent Performance ---")
 try:
     evaluator = Evaluator("openai/gpt-4o")
-    
+
     # Construct a view of the trace for the judge
     trace_summary = (
         f"User: What is the weather in Tokyo?\n"
@@ -96,13 +106,13 @@ try:
         f"Observation: 15 degrees Celsius, Sunny\n"
         f"Agent Final: {reasoning[1]}"
     )
-    
+
     result = evaluator.evaluate(
         response=trace_summary,
         output_schema=AgentEvaluation,
-        system_prompt="Evaluate if the agent followed a logical plan and used the observation correctly."
+        system_prompt="Evaluate if the agent followed a logical plan and used the observation correctly.",
     )
-    
+
     print(f"Plan Followed: {result.plan_followed}")
     print(f"Correct: {result.final_answer_correct}")
 

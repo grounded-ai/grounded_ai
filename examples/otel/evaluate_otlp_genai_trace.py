@@ -1,7 +1,9 @@
 import os
-from grounded_ai.otel import TraceConverter
-from grounded_ai import Evaluator
+
 from pydantic import BaseModel, Field
+
+from grounded_ai import Evaluator
+from grounded_ai.otel import TraceConverter
 
 # Set API Key for demo purposes (User provided)
 if "OPENAI_API_KEY" not in os.environ:
@@ -10,33 +12,37 @@ if "OPENAI_API_KEY" not in os.environ:
 # 1. Define Standard OTel GenAI Trace Data
 # Utilizing nested 'parts' list as per latest Semantic Conventions
 raw_span = {
-  "trace_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
-  "span_id": "1a2b3c4d1a2b3c4d",
-  "name": "chat gpt-4",
-  "start_time": "2024-01-15T10:30:00Z",
-  "end_time": "2024-01-15T10:30:02Z",
-  "attributes": {
-    "gen_ai.system": "openai",
-    "gen_ai.request.model": "gpt-5-mini",
-    "gen_ai.usage.input_tokens": 42,
-    "gen_ai.usage.output_tokens": 156,
-    "gen_ai.input.messages": [
-      {
-        "role": "system",
-        "parts": [{"type": "text", "content": "You are a helpful assistant."}]
-      },
-      {
-        "role": "user",
-        "parts": [{"type": "text", "content": "What is the capital of France?"}]
-      }
-    ],
-    "gen_ai.output.messages": [
-      {
-        "role": "assistant",
-        "parts": [{"type": "text", "content": "The capital of France is Paris."}]
-      }
-    ]
-  }
+    "trace_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    "span_id": "1a2b3c4d1a2b3c4d",
+    "name": "chat gpt-4",
+    "start_time": "2024-01-15T10:30:00Z",
+    "end_time": "2024-01-15T10:30:02Z",
+    "attributes": {
+        "gen_ai.system": "openai",
+        "gen_ai.request.model": "gpt-5-mini",
+        "gen_ai.usage.input_tokens": 42,
+        "gen_ai.usage.output_tokens": 156,
+        "gen_ai.input.messages": [
+            {
+                "role": "system",
+                "parts": [{"type": "text", "content": "You are a helpful assistant."}],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {"type": "text", "content": "What is the capital of France?"}
+                ],
+            },
+        ],
+        "gen_ai.output.messages": [
+            {
+                "role": "assistant",
+                "parts": [
+                    {"type": "text", "content": "The capital of France is Paris."}
+                ],
+            }
+        ],
+    },
 }
 
 # 2. Convert
@@ -72,14 +78,18 @@ print("SUCCESS: Standard OTel GenAI trace parsed correctly.")
 # 4. Real Evaluation
 # We evaluate if the model's response is factually correct given the user query.
 
+
 class ResponseCorrectness(BaseModel):
-    is_correct: bool = Field(description="True if the response accurately answers the user's question.")
+    is_correct: bool = Field(
+        description="True if the response accurately answers the user's question."
+    )
     explanation: str = Field(description="Reasoning for the score.")
+
 
 print("\n--- Running Evaluator ---")
 evaluator = Evaluator(
     model="openai/gpt-4o",
-    system_prompt="You are an expert judge. Evaluate the accuracy of the assistant's response."
+    system_prompt="You are an expert judge. Evaluate the accuracy of the assistant's response.",
 )
 
 # Construct evaluation input from the parsed span
@@ -89,10 +99,7 @@ eval_input = (
 )
 
 try:
-    result = evaluator.evaluate(
-        response=eval_input,
-        output_schema=ResponseCorrectness
-    )
+    result = evaluator.evaluate(response=eval_input, output_schema=ResponseCorrectness)
     # Check if result is the schema or an error
     if isinstance(result, ResponseCorrectness):
         print(f"Is Correct: {result.is_correct}")

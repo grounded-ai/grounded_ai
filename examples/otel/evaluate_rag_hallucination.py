@@ -1,6 +1,7 @@
-
 import os
+
 from pydantic import BaseModel, Field
+
 from grounded_ai import Evaluator
 from grounded_ai.otel import TraceConverter
 
@@ -20,7 +21,6 @@ raw_span = {
         "gen_ai.system": "openai",
         "gen_ai.request.model": "gpt-4-turbo-preview",
         "gen_ai.request.temperature": 0.1,
-        
         "gen_ai.input.messages": [
             {
                 "role": "system",
@@ -59,21 +59,20 @@ USPS Ground Advantage — Retail mail must not exceed 70 pounds.
 
 Instruction: Based on the above documents, provide a detailed answer for the user question below.
 Answer "don't know" if not present in the document.
-"""
+""",
             },
             {
                 "role": "user",
-                "content": "What is the maximum weight for a First-Class Mail letter?"
-            }
+                "content": "What is the maximum weight for a First-Class Mail letter?",
+            },
         ],
-        
         "gen_ai.output.messages": [
             {
                 "role": "assistant",
-                "content": "Based on the documents provided, a First-Class Mail letter must not exceed 70 pounds."
+                "content": "Based on the documents provided, a First-Class Mail letter must not exceed 70 pounds.",
             }
-        ]
-    }
+        ],
+    },
 }
 
 # 2. Convert to Agent Trace (GenAIConversation)
@@ -86,11 +85,17 @@ print(f"Trace ID: {conversation.conversation_id}")
 print(f"Span ID: {span.span_id}")
 print(f"System: {span.gen_ai_system}")
 
+
 # 3. Define Metric Schema
 class CorrectnessEval(BaseModel):
-    is_faithful: bool = Field(description="True if the answer is supported by the provided context.")
-    is_correct: bool = Field(description="True if the answer is factually correct based on the context.")
+    is_faithful: bool = Field(
+        description="True if the answer is supported by the provided context."
+    )
+    is_correct: bool = Field(
+        description="True if the answer is factually correct based on the context."
+    )
     reasoning: str = Field(description="Explanation of discrepancies.")
+
 
 # Set API Key (Placeholder - User must provide)
 if "OPENAI_API_KEY" not in os.environ:
@@ -99,7 +104,7 @@ if "OPENAI_API_KEY" not in os.environ:
 # 4. Initialize Evaluator
 evaluator = Evaluator(
     model="openai/gpt-4o-mini",
-    system_prompt="You are a RAG evaluator. Verify if the Assistant's response is supported by the System Prompt context."
+    system_prompt="You are a RAG evaluator. Verify if the Assistant's response is supported by the System Prompt context.",
 )
 
 # 5. Evaluate
@@ -107,22 +112,25 @@ evaluator = Evaluator(
 full_history = conversation.get_full_conversation()
 
 # Extract context and query helper
-system_context = next((m["content"] for m in full_history if m["role"] == "system"), "No context found")
-user_query = next((m["content"] for m in full_history if m["role"] == "user"), "No query found")
-assistant_answer = next((m["content"] for m in full_history if m["role"] == "assistant"), "No answer found")
+system_context = next(
+    (m["content"] for m in full_history if m["role"] == "system"), "No context found"
+)
+user_query = next(
+    (m["content"] for m in full_history if m["role"] == "user"), "No query found"
+)
+assistant_answer = next(
+    (m["content"] for m in full_history if m["role"] == "assistant"), "No answer found"
+)
 
 eval_payload = (
-    f"Retrieved Context:\n{system_context[:2000]}...\n\n" # Truncate large context for display/eval prompt safety
+    f"Retrieved Context:\n{system_context[:2000]}...\n\n"  # Truncate large context for display/eval prompt safety
     f"User Question: {user_query}\n\n"
     f"Model Answer: {assistant_answer}"
 )
 
 print("\nEvaluating RAG Correctness...")
 try:
-    result = evaluator.evaluate(
-        response=eval_payload,
-        output_schema=CorrectnessEval
-    )
+    result = evaluator.evaluate(response=eval_payload, output_schema=CorrectnessEval)
     print(f"Faithful: {result.is_faithful}")
     print(f"Reasoning: {result.reasoning}")
 except Exception as e:
