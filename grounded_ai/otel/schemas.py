@@ -2,7 +2,7 @@
 OpenTelemetry GenAI Semantic Convention Models.
 
 Pydantic models for LLM traces following OpenTelemetry GenAI semantic conventions
-as used by Blue Guardrails and other OTel-compatible platforms.
+as used by LogFire and other OTel-compatible platforms.
 """
 
 from datetime import datetime
