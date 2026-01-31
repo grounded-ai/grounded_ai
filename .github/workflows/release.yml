@@ -2,9 +2,8 @@ name: Publish to PyPI
 
 on:
   push:
-    branches:
-      - release
-      - "release-*"
+    tags:
+      - "v*"  # Trigger on version tags like v1.0.8
   workflow_dispatch:
 
 permissions:
@@ -15,7 +14,7 @@ jobs:
   build-and-publish:
     name: Build and Publish to PyPI
     runs-on: ubuntu-latest
-    environment: 
+    environment:
       name: release
       url: https://pypi.org/p/grounded-ai
 

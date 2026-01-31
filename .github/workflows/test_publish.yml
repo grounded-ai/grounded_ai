@@ -4,19 +4,19 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - sbx  # Allow auto-publish on push to sbx if desired, or remove if manual only
+      - sbx
 
 permissions:
   contents: read
-  id-token: write  # Required for OIDC authentication with PyPI
+  id-token: write
 
 jobs:
   build-and-publish:
     name: Build and Publish to TestPyPI
     runs-on: ubuntu-latest
     environment:
-      name: testpypi  # Must match the environment name configured in PyPI Trusted Publisher settings
-    
+      name: testpypi
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,7 +33,9 @@ jobs:
 
       - name: Patch version for TestPyPI
         run: |
-          sed -i 's/version = "\([0-9]*\.[0-9]*\.[0-9]*\)"/version = "\1.dev${{ github.run_number }}"/' pyproject.toml
+          # Use .post suffix instead of .dev so pip install picks it up without --pre
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          sed -i "s/version = \"\([0-9]*\.[0-9]*\.[0-9]*\)\"/version = \"\1.post${TIMESTAMP}\"/" pyproject.toml
           echo "Patched version:"
           grep "version =" pyproject.toml
 
@@ -44,4 +46,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          # No username/password required; usage of 'id-token: write' enables OIDC
