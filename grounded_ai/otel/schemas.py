@@ -212,11 +212,23 @@ class GenAIConversation(BaseModel):
         for span in self.spans:
             # Inputs (User messages & Tool Outputs)
             for msg in span.gen_ai_input_messages:
-                content_parts = [
-                    p.content if p.type == "text" else p.response 
-                    for p in msg.parts 
-                    if p.type in ("text", "tool_call_response")
-                ]
+                content_parts = []
+                tool_calls = []
+
+                for p in msg.parts:
+                    if p.type == "text":
+                        content_parts.append(p.content)
+                    elif p.type == "tool_call_response":
+                        content_parts.append(p.response)
+                    elif p.type == "tool_call":
+                        tool_calls.append({
+                            "id": p.id,
+                            "type": "function",
+                            "function": {
+                                "name": p.name,
+                                "arguments": p.arguments
+                            }
+                        })
                 
                 msg_dict = {
                     "role": msg.role,
@@ -227,6 +239,9 @@ class GenAIConversation(BaseModel):
                 for p in msg.parts:
                     if p.type == "tool_call_response" and p.id:
                          msg_dict["tool_call_id"] = p.id
+                
+                if tool_calls:
+                    msg_dict["tool_calls"] = tool_calls
 
                 messages.append(msg_dict)
 
