@@ -203,74 +203,62 @@ class GenAIConversation(BaseModel):
     def get_full_conversation(self) -> List[Dict[str, Any]]:
         """
         Get the complete conversation history including tool calls and outputs.
+        Deduplicates messages based on content to handle overlapping span histories.
         
         Returns:
             List of message dicts (OpenAI/Anthropic compatible format).
         """
         messages = []
+        seen = set()
 
-        for span in self.spans:
-            # Inputs (User messages & Tool Outputs)
-            for msg in span.gen_ai_input_messages:
-                content_parts = []
-                tool_calls = []
+        for msg in self.get_all_messages():
+            content_parts = []
+            tool_calls = []
+            tool_call_id = None
 
-                for p in msg.parts:
-                    if p.type == "text":
-                        content_parts.append(p.content)
-                    elif p.type == "tool_call_response":
-                        content_parts.append(p.response)
-                    elif p.type == "tool_call":
-                        tool_calls.append({
-                            "id": p.id,
-                            "type": "function",
-                            "function": {
-                                "name": p.name,
-                                "arguments": p.arguments
-                            }
-                        })
-                
-                msg_dict = {
-                    "role": msg.role,
-                    "content": "\n".join(filter(None, content_parts))
-                }
-                
-                # Check for tool_call_id linkage for tool outputs
-                for p in msg.parts:
-                    if p.type == "tool_call_response" and p.id:
-                         msg_dict["tool_call_id"] = p.id
-                
-                if tool_calls:
-                    msg_dict["tool_calls"] = tool_calls
+            for p in msg.parts:
+                if p.type == "text" and p.content:
+                    content_parts.append(p.content)
+                elif p.type == "tool_call_response":
+                    content_parts.append(p.response)
+                    # Link to the call if ID present
+                    if p.id:
+                        tool_call_id = p.id
+                elif p.type == "tool_call":
+                    tool_calls.append({
+                        "id": p.id,
+                        "type": "function",
+                        "function": {
+                            "name": p.name,
+                            "arguments": p.arguments
+                        }
+                    })
 
-                messages.append(msg_dict)
+            # Build the dict
+            msg_dict = {
+                "role": msg.role,
+                "content": "\n".join(filter(None, content_parts)) if content_parts else None
+            }
 
-            # Outputs (Assistant responses & Tool Calls)
-            for msg in span.gen_ai_output_messages:
-                content_parts = []
-                tool_calls = []
+            if tool_calls:
+                msg_dict["tool_calls"] = tool_calls
+            if tool_call_id:
+                msg_dict["tool_call_id"] = tool_call_id
 
-                for p in msg.parts:
-                    if p.type == "text":
-                        content_parts.append(p.content)
-                    elif p.type == "tool_call":
-                        tool_calls.append({
-                            "id": p.id,
-                            "type": "function",
-                            "function": {
-                                "name": p.name,
-                                "arguments": p.arguments
-                            }
-                        })
-
-                msg_dict = {
-                    "role": msg.role,
-                    "content": "\n".join(content_parts) if content_parts else None
-                }
-                
-                if tool_calls:
-                    msg_dict["tool_calls"] = tool_calls
-
+            # Deduplication Signature
+            # We use a tuple of stable representation of key fields
+            # (role, content, num_tool_calls, first_tool_id)
+            # This avoids adding the exact same message twice if spans overlap context.
+            sig = (
+                msg.role,
+                msg_dict["content"],
+                len(tool_calls),
+                tool_calls[0]["id"] if tool_calls else None,
+                tool_call_id
+            )
+            
+            if sig not in seen:
+                seen.add(sig)
                 messages.append(msg_dict)
 
         return messages
