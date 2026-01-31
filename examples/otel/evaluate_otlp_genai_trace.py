@@ -14,14 +14,14 @@ if "OPENAI_API_KEY" not in os.environ:
 raw_span = {
     "trace_id": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
     "span_id": "1a2b3c4d1a2b3c4d",
-    "name": "chat gpt-4",
-    "start_time": "2024-01-15T10:30:00Z",
-    "end_time": "2024-01-15T10:30:02Z",
+    "name": "chat gpt-4o-mini",
+    "start_time": "2026-01-15T10:30:00Z",
+    "end_time": "2026-01-15T10:30:02Z",
     "attributes": {
         "gen_ai.system": "openai",
-        "gen_ai.request.model": "gpt-5-mini",
-        "gen_ai.usage.input_tokens": 42,
-        "gen_ai.usage.output_tokens": 156,
+        "gen_ai.request.model": "gpt-4o-mini",
+        "gen_ai.usage.input_tokens": 12,
+        "gen_ai.usage.output_tokens": 16,
         "gen_ai.input.messages": [
             {
                 "role": "system",
