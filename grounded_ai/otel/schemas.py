@@ -66,7 +66,7 @@ class TokenUsage(BaseModel):
 class GenAISpan(BaseModel):
     """
     A single LLM invocation following OpenTelemetry GenAI semantic conventions.
-    This is what Blue Guardrails and other OTel platforms expect.
+    This is what Blue Guardrails and other OTel-compatible platforms expect.
     """
 
     # Identity (OpenTelemetry core)
@@ -294,3 +294,39 @@ class GenAIConversation(BaseModel):
                                     tc["result"] = part.response
 
         return tool_calls
+
+    def to_evaluation_string(self) -> str:
+        """Render the conversation as a token-efficient string for LLM evaluation."""
+        lines = []
+
+        conversation = self.get_full_conversation()
+        tools = self.get_tool_usage_summary()
+
+        # Build numbered trace from conversation
+        steps = []
+        tool_idx = 0
+        for msg in conversation:
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "user":
+                steps.append(f"[User] {content}")
+            elif role == "assistant":
+                line = f"[Assistant] {content}"
+                # Check if there's a tool call at this point
+                if tool_idx < len(tools):
+                    tc = tools[tool_idx]
+                    args = ", ".join(f"{k}={v!r}" for k, v in (tc.get("arguments") or {}).items())
+                    line += f" → called {tc['tool']}({args})"
+                    tool_idx += 1
+                steps.append(line)
+            elif role == "system":
+                steps.append(f"[System] {content}")
+            elif role == "tool":
+                steps.append(f"[Tool] {content}")
+
+        if steps:
+            numbered = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
+            lines.append(f"## Agent Trace\n{numbered}")
+
+        return "\n\n".join(lines)

@@ -74,8 +74,14 @@ class Evaluator:
             output_schema: Optional override for the output structure.
             **kwargs: If input_data is not provided, kwargs are used to construct EvaluationInput.
         """
+        # Handle GenAIConversation: collapse to evaluation string
+        if isinstance(input_data, GenAIConversation):
+            input_data = EvaluationInput(
+                response=input_data.to_evaluation_string(),
+            )
+
         # Handle string passed as positional argument or direct string
-        if isinstance(input_data, str):
+        elif isinstance(input_data, str):
             input_data = EvaluationInput(response=input_data, **kwargs)
 
         # Handle kwargs-based construction if input_data is None
