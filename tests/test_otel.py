@@ -105,9 +105,8 @@ def test_conversation_helpers():
     assert full_history[0] == {"role": "user", "content": "Hello"}
     assert full_history[1] == {"role": "assistant", "content": "Hi there"}
 
-    # get_reasoning_chain
-    reasoning = conversation.get_reasoning_chain()
-    assert reasoning == ["Hi there"]
+    # get_reasoning_chain removed
+
 
 
 def test_trace_converter_otlp_list():
