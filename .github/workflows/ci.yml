@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "sbx" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    # Install uv for fast dependency management
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install dependencies
+      run: |
+        source $HOME/.cargo/env
+        uv pip install --system -e .
+        uv pip install --system pytest ruff
+
+    - name: Lint with Ruff
+      run: |
+        source $HOME/.cargo/env
+        ruff check .
+        # Optional: Uncomment if you want to enforce formatting
+        # ruff format --check .
+
+    - name: Run Tests
+      run: |
+        source $HOME/.cargo/env
+        pytest
