@@ -286,7 +286,7 @@ class TraceConverter:
                         )
                     )
                 elif content:
-                     parts.append(MessagePart(type="text", content=str(content)))
+                    parts.append(MessagePart(type="text", content=str(content)))
 
             # 3. OpenAI 'tool_calls' format
             if "tool_calls" in m:
@@ -298,11 +298,11 @@ class TraceConverter:
                         try:
                             args = json.loads(args)
                         except Exception:
-                            # If parsing fails, store as is (or empty)? 
+                            # If parsing fails, store as is (or empty)?
                             # Pydantic expects Dict. If it's a string verify failure.
                             # Just set as raw dict wrapper if needed or None
                             pass
-                            
+
                     parts.append(
                         MessagePart(
                             type="tool_call",
@@ -311,7 +311,7 @@ class TraceConverter:
                             arguments=args if isinstance(args, dict) else {},
                         )
                     )
-            
+
             results.append(GenAIMessage(role=role, parts=parts))
         return results
 

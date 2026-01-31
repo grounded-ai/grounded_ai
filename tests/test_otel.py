@@ -108,7 +108,6 @@ def test_conversation_helpers():
     # get_reasoning_chain removed
 
 
-
 def test_trace_converter_otlp_list():
     """Test OTLP conversion with Python list messages (non-serialized)."""
     mock_span = MOCK_OTLP_SPAN.copy()
@@ -127,6 +126,7 @@ def test_empty_input():
     with pytest.raises(ValueError):
         TraceConverter.from_otlp([])
 
+
 def test_tool_call_parsing():
     """Test full conversation parsing with tool calls."""
     # 1. Span with Tool Call generation
@@ -138,23 +138,32 @@ def test_tool_call_parsing():
         "end_time": "2024-01-01T10:00:05Z",
         "attributes": {
             "gen_ai.system": "openai",
-            "gen_ai.input.messages": json.dumps([
-                {"role": "user", "content": "What's the weather?"},
-            ]),
-            "gen_ai.output.messages": json.dumps([
-                {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_123",
-                        "type": "function",
-                        "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'}
-                    }]
-                }
-            ])
-        }
+            "gen_ai.input.messages": json.dumps(
+                [
+                    {"role": "user", "content": "What's the weather?"},
+                ]
+            ),
+            "gen_ai.output.messages": json.dumps(
+                [
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"city": "Paris"}',
+                                },
+                            }
+                        ],
+                    }
+                ]
+            ),
+        },
     }
-    
+
     # 2. Span with Tool Response + Final Answer
     tool_output_span = {
         "trace_id": "trace-tool",
@@ -164,37 +173,37 @@ def test_tool_call_parsing():
         "end_time": "2024-01-01T10:00:15Z",
         "attributes": {
             "gen_ai.system": "openai",
-            "gen_ai.input.messages": json.dumps([
-                 {"role": "tool", "content": "15C", "tool_call_id": "call_123"} 
-            ]),
-            "gen_ai.output.messages": json.dumps([
-                {"role": "assistant", "content": "It is 15C in Paris."}
-            ])
-        }
+            "gen_ai.input.messages": json.dumps(
+                [{"role": "tool", "content": "15C", "tool_call_id": "call_123"}]
+            ),
+            "gen_ai.output.messages": json.dumps(
+                [{"role": "assistant", "content": "It is 15C in Paris."}]
+            ),
+        },
     }
 
     conversation = TraceConverter.from_otlp([tool_span, tool_output_span])
     msgs = conversation.get_full_conversation()
-    
+
     # We expect 4 messages in total:
     assert len(msgs) == 4
-    
+
     # Check User
     assert msgs[0]["role"] == "user"
     assert msgs[0]["content"] == "What's the weather?"
-    
+
     # Check Assistant Tool Call
     assert msgs[1]["role"] == "assistant"
     # Content usually None or null for tool calls, but my serializer might join empty parts to "" or None.
     # The helper generic 'get_full_conversation' puts None if content_parts is empty.
     assert msgs[1].get("tool_calls")[0]["function"]["name"] == "get_weather"
     assert msgs[1].get("tool_calls")[0]["id"] == "call_123"
-    
+
     # Check Tool Response
     assert msgs[2]["role"] == "tool"
     assert msgs[2]["content"] == "15C"
     assert msgs[2]["tool_call_id"] == "call_123"
-    
+
     # Check Final Answer
     assert msgs[3]["role"] == "assistant"
     assert msgs[3]["content"] == "It is 15C in Paris."

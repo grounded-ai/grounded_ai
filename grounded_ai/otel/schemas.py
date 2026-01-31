@@ -204,7 +204,7 @@ class GenAIConversation(BaseModel):
         """
         Get the complete conversation history including tool calls and outputs.
         Deduplicates messages based on content to handle overlapping span histories.
-        
+
         Returns:
             List of message dicts (OpenAI/Anthropic compatible format).
         """
@@ -225,19 +225,20 @@ class GenAIConversation(BaseModel):
                     if p.id:
                         tool_call_id = p.id
                 elif p.type == "tool_call":
-                    tool_calls.append({
-                        "id": p.id,
-                        "type": "function",
-                        "function": {
-                            "name": p.name,
-                            "arguments": p.arguments
+                    tool_calls.append(
+                        {
+                            "id": p.id,
+                            "type": "function",
+                            "function": {"name": p.name, "arguments": p.arguments},
                         }
-                    })
+                    )
 
             # Build the dict
             msg_dict = {
                 "role": msg.role,
-                "content": "\n".join(filter(None, content_parts)) if content_parts else None
+                "content": "\n".join(filter(None, content_parts))
+                if content_parts
+                else None,
             }
 
             if tool_calls:
@@ -254,9 +255,9 @@ class GenAIConversation(BaseModel):
                 msg_dict["content"],
                 len(tool_calls),
                 tool_calls[0]["id"] if tool_calls else None,
-                tool_call_id
+                tool_call_id,
             )
-            
+
             if sig not in seen:
                 seen.add(sig)
                 messages.append(msg_dict)
