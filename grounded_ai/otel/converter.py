@@ -273,12 +273,45 @@ class TraceConverter:
                             )
                         )
 
-            # 2. Simplified 'content' string
+            # 2. Simplified 'content' string key
             elif "content" in m:
                 content = m.get("content")
-                if content:
-                    parts.append(MessagePart(type="text", content=str(content)))
+                if "tool_call_id" in m:
+                    # It's a tool response
+                    parts.append(
+                        MessagePart(
+                            type="tool_call_response",
+                            id=m.get("tool_call_id"),
+                            response=str(content) if content else None,
+                        )
+                    )
+                elif content:
+                     parts.append(MessagePart(type="text", content=str(content)))
 
+            # 3. OpenAI 'tool_calls' format
+            if "tool_calls" in m:
+                for tc in m["tool_calls"]:
+                    func = tc.get("function", {})
+                    args = func.get("arguments")
+                    # Parse JSON string arguments if needed
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            # If parsing fails, store as is (or empty)? 
+                            # Pydantic expects Dict. If it's a string verify failure.
+                            # Just set as raw dict wrapper if needed or None
+                            pass
+                            
+                    parts.append(
+                        MessagePart(
+                            type="tool_call",
+                            id=tc.get("id"),
+                            name=func.get("name"),
+                            arguments=args if isinstance(args, dict) else {},
+                        )
+                    )
+            
             results.append(GenAIMessage(role=role, parts=parts))
         return results
 
