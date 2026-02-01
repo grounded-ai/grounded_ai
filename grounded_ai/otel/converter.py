@@ -343,14 +343,19 @@ class TraceConverter:
 
             # Tool calls in message?
             tool_calls = m.get("tool_calls", [])
-            for tc in tool_calls:
+                args = tc.get("args") or tc.get("function", {}).get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        pass
+
                 parts.append(
                     MessagePart(
                         type="tool_call",
                         id=tc.get("id"),
                         name=tc.get("name") or tc.get("function", {}).get("name"),
-                        arguments=tc.get("args")
-                        or tc.get("function", {}).get("arguments"),
+                        arguments=args if isinstance(args, dict) else {},
                     )
                 )
 
@@ -369,13 +374,20 @@ def gens_to_message(gen: Dict) -> Optional[GenAIMessage]:
 
     tool_calls = msg_dict.get("tool_calls", [])
     for tc in tool_calls:
+        args = tc.get("function", {}).get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                pass
+
         # Check if already added (sometimes text includes tool call repr)
         parts.append(
             MessagePart(
                 type="tool_call",
                 id=tc.get("id"),
                 name=tc.get("function", {}).get("name"),
-                arguments=tc.get("function", {}).get("arguments"),
+                arguments=args if isinstance(args, dict) else {},
             )
         )
 
