@@ -66,6 +66,9 @@ class TestAnthropicBackend:
         # Check Beta Header
         assert "betas" in kwargs
         assert "structured-outputs-2025-11-13" in kwargs["betas"]
+        
+        # Check Default max_tokens
+        assert kwargs["max_tokens"] == 1024
 
         # Check Schema Patching in output_format
         output_format = kwargs["output_format"]
