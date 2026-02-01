@@ -27,23 +27,6 @@ Grounded AI is built on a philosophy of separation of concerns:
 2.  **Model / Provider Agnostic Backends**: The evaluation *definition* is decoupled from the *execution engine*. You can run the exact same metric on **GPT-4o** for high-precision audits, or switch to a local **Llama Guard** model for high-volume CI/CD checks—without changing a single line of your validation logic.
 
 
-## Implementation Status
-
-| Backend | Status | Description |
-| :--- | :--- | :--- |
-| **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
-| **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
-| **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
-| **HuggingFace** | ✅ | Run any generic HF model locally. |
-| **Integrations** | 🏗️ **Planned** | LiteLLM |
-
-## Backend Capabilities
-
-| Feature | Grounded AI SLM | OpenAI | Anthropic | HuggingFace |
-| :--- | :--- | :--- | :--- | :--- |
-| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
-| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection |
 
 
 ## Installation
@@ -115,7 +98,26 @@ result = evaluator.evaluate(
 print(result.forbidden_words) # ['kinda', 'cheap']
 ```
 
-### 4. Agent Trace Evaluation
+### 4. Customizing Evaluation Prompts
+You can override the default Jinja2 template to enforce specific evaluation rules dynamically without creating a new class.
+
+```python
+evaluator = Evaluator("openai/gpt-4o")
+
+result = evaluator.evaluate(
+    response="The API endpoint defaults to port 8080.",
+    # Override the prompt template
+    base_template="""
+        You are a security auditor.
+        Check if the following configuration adheres to the policy: "All ports must be explicit."
+        
+        Config: {{ response }}
+    """
+)
+print(result.label)
+```
+
+### 5. Agent Trace Evaluation
 Flatten complex agent traces (OpenTelemetry, LangSmith) into a linear story for evaluation.
 
 ```python
@@ -135,6 +137,24 @@ result = evaluator.evaluate(
     system_prompt="Did the agent complete the task correctly?"
 )
 ```
+    
+## Implementation Status
+
+| Backend | Status | Description |
+| :--- | :--- | :--- |
+| **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
+| **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
+| **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
+| **HuggingFace** | ✅ | Run any generic HF model locally. |
+| **Integrations** | 🏗️ **Planned** | LiteLLM |
+
+## Backend Capabilities
+
+| Feature | Grounded AI SLM | OpenAI | Anthropic | HuggingFace |
+| :--- | :--- | :--- | :--- | :--- |
+| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection |
 
 ## API Reference
 
