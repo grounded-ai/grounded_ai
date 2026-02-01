@@ -343,13 +343,14 @@ class TraceConverter:
 
             # Tool calls in message?
             tool_calls = m.get("tool_calls", [])
+            for tc in tool_calls:
                 args = tc.get("args") or tc.get("function", {}).get("arguments")
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
                     except Exception:
                         pass
-
+                
                 parts.append(
                     MessagePart(
                         type="tool_call",
