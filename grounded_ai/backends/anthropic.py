@@ -91,6 +91,10 @@ class AnthropicBackend(BaseEvaluator):
         # Merge init kwargs with runtime kwargs (runtime overrides init)
         request_kwargs = {**self.kwargs, **kwargs}
 
+        # Ensure max_tokens is present (Required by Anthropic API)
+        if "max_tokens" not in request_kwargs:
+            request_kwargs["max_tokens"] = 1024
+
         try:
             # Use Beta Structured Outputs
             response = self.client.beta.messages.create(
