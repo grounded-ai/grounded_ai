@@ -16,8 +16,15 @@ Most evaluation libraries are black boxes. **Grounded AI** is different:
 
 1.  **Standardization**: A single, type-safe function (`evaluate()`) for *any* backend (Grounded AI SLM, HuggingFace, OpenAI, Anthropic).
 2.  **Modularity**: Don't like our prompts? **Change them.** Don't like our schemas? **Bring your own.** Every part of the pipeline is customizable.
-3.  **Evaluations Made Easy**: JSON-mode, retries, and schema validation are handled for you. Just focus on your data.
+3.  **Evaluations Made Easy**: JSON-mode and schema validation are handled for you. Just focus on your data.
 4.  **Privacy First**: First-class support for running evaluations 100% locally on your own GPU.
+
+## Decoupled Architecture
+
+Grounded AI is built on a philosophy of separation of concerns:
+
+1.  **No Metric Lock-in**: Unlike other eval libraries that lock you into their pre-defined, black-box metrics, Grounded AI puts you in control. Evaluations are just Pydantic schemas. Need a specific "Brand Voice Compliance" metric? Define it yourself in seconds. You are never limited to what the vendor provides.
+2.  **Model / Provider Agnostic Backends**: The evaluation *definition* is decoupled from the *execution engine*. You can run the exact same metric on **GPT-4o** for high-precision audits, or switch to a local **Llama Guard** model for high-volume CI/CD checks—without changing a single line of your validation logic.
 
 
 ## Implementation Status
@@ -28,7 +35,7 @@ Most evaluation libraries are black boxes. **Grounded AI** is different:
 | **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
 | **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
 | **HuggingFace** | ✅ | Run any generic HF model locally. |
-| **Integrations** | 🏗️ **Planned** | LangSmith Tracing, OpenTelemetry, AWS Bedrock. |
+| **Integrations** | 🏗️ **Planned** | LiteLLM |
 
 ## Backend Capabilities
 
@@ -53,151 +60,80 @@ pip install grounded-ai[slm]
 
 ## Quick Start
 
-### 1. Using Grounded AI Models (Specialized)
-
-Run our specialized evaluation models locally.
+### 1. Evaluation with SLM's
+Run specialized models locally on your GPU. No API keys needed.
 
 ```python
-from grounded_ai import Evaluator, EvalMode
+from grounded_ai import Evaluator
 
-# Initialize for Hallucination detection
-evaluator = Evaluator(
-    "grounded-ai/phi4-mini-judge",
-    eval_mode=EvalMode.HALLUCINATION,
-    device="cuda" # or "cpu"
-)
+# Auto-downloads the localized judge model
+evaluator = Evaluator("grounded-ai/phi4-mini-judge", device="cuda")
 
-# Detect if the response contradicts the context
+# Check for Hallucinations
 result = evaluator.evaluate(
     response="London is the capital of France.",
-    query="What is the capital?",
-    context="Paris is the capital of France."
+    context="Paris is the capital of France.",
+    eval_mode="HALLUCINATION"
 )
-
-print(result)
-# score=1.0 label='hallucinated' confidence=0.99 reasoning='Contradicts context Paris.'
+print(result.label) # 'hallucinated'
 ```
 
-### 2. Using OpenAI (GPT-4o)
-
-We handle the complexity of "Structured Outputs" for you.
+### 2. Evaluation with Proprietary Models
+Use GPT-4o or Claude for high-precision auditing. We handle the structured output complexity.
 
 ```python
 import os
 os.environ["OPENAI_API_KEY"] = "sk-..."
 
-# 1. Initialize Evaluator
-# Default System Prompt: "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
 evaluator = Evaluator("openai/gpt-4o")
 
-# 2. Run check (e.g. Hallucination)
 result = evaluator.evaluate(
-    response="The meeting is on Tuesday.",
-    context="The meeting was rescheduled to Wednesday."
+    response="The user is asking for illegal streaming sites.",
+    system_prompt="Is this content safe?"
 )
-
 print(result)
-# score=1.0 label='hallucinated' reasoning='Contradicts context (Tuesday vs Wednesday).'
+# EvaluationOutput(score=1.0, label='unsafe', ...)
 ```
 
-*Want to change the system prompt? Just pass `system_prompt="You are a strict judge..."` to the constructor.*
-
-
-### 3. Using Anthropic (Claude)
+### 3. Custom Metrics
+Define your OWN metrics using Pydantic. Use this for "Brand Compliance", "Code Quality", or anything specific to your business.
 
 ```python
-import os
-os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
+from pydantic import BaseModel
 
-
-evaluator = Evaluator("anthropic/claude-haiku-4-5-20251001")
-
-result = evaluator.evaluate(response="How do I break into a car?")
-# score=1.0 label='unsafe' ...
-```
-
-### 4. Custom Templating
-
-You can completely customize how your inputs are presented to the model using Jinja2 templates. Variables `{{ response }}`, `{{ context }}`, `{{ query }}` are available by default.
-
-```python
-from grounded_ai import Evaluator, EvaluationInput
+class BrandCheck(BaseModel):
+    tone_compliant: bool
+    forbidden_words: list[str]
 
 evaluator = Evaluator("openai/gpt-4o")
 
-# Define a custom template
-custom_template = """
-SYSTEM: You are a strict code reviewer.
-CODE: {{ response }}
-
-{% if context %}
-CONTEXT: {{ context }}
-{% endif %}
-
-Evaluate the code quality.
-"""
-
-input_data = EvaluationInput(
-    response="def foo(): pass",
-    context="Python coding standards",
-    base_template=custom_template
-)
-
-# Prompts the model with your custom format!
-result = evaluator.evaluate(input_data)
-```
-
-### 5. Completely Custom Logic (Modular Schemas)
-    
-You are not limited to our `EvaluationInput` or `EvaluationOutput`. You can define **ANY** Pydantic model for input and output, and the library will handle the rest.
-
-```python
-from pydantic import BaseModel, Field
-
-# 1. Define your own Input Schema
-class CodeReviewInput(BaseModel):
-    code: str
-    language: str
-
-# 2. Define your own Output Schema
-class CodeReviewOutput(BaseModel):
-    bugs_found: int
-    security_risk: bool
-    suggestions: list[str]
-
-# 3. Initialize Evaluator (Any backend)
-evaluator = Evaluator("openai/gpt-4o", system_prompt="You are a senior engineer.")
-
-# 4. Run Evaluation
 result = evaluator.evaluate(
-    input_data=CodeReviewInput(code="print('hello')", language="python"),
-    output_schema=CodeReviewOutput
+    response="Our product is kinda cheap.",
+    output_schema=BrandCheck
 )
-
-print(result.security_risk) # False
-print(result.suggestions)   # ['Add type hints', ...]
+# Returns a typed object directly!
+print(result.forbidden_words) # ['kinda', 'cheap']
 ```
 
-### 6. Agent Trace Evaluation (OpenTelemetry)
-
-Grounded AI natively supports parsing and evaluating agent traces from **OpenTelemetry (OTLP)** and **LangSmith**. We follow the *OpenTelemetry GenAI Semantic Conventions*.
+### 4. Agent Trace Evaluation
+Flatten complex agent traces (OpenTelemetry, LangSmith) into a linear story for evaluation.
 
 ```python
 from grounded_ai.otel import TraceConverter
 
-# 1. Parse raw trace from OTLP or LangSmith
-# (Pass in your raw trace dict or span list)
-conversation = TraceConverter.from_otlp([raw_otlp_span])
-# OR
-conversation = TraceConverter.from_langsmith(raw_langsmith_run)
+# 1. Convert scattered OTel spans into a logical conversation
+conversation = TraceConverter.from_otlp(raw_spans)
 
-# 2. Extract conversation history for evaluation
-messages = conversation.get_full_conversation()
-# [{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+# 2. Extract the reasoning chain (Thought -> Tool -> Observation -> Answer)
+# This unifies the agent's logic flow.
+reasoning = conversation.get_reasoning_chain()
 
-# 3. Evaluate using the Evaluator
+# 3. Evaluate the full flow
 evaluator = Evaluator("openai/gpt-4o")
-# ... use messages in your prompt ...
+result = evaluator.evaluate(
+    response="\n".join(reasoning),
+    system_prompt="Did the agent complete the task correctly?"
+)
 ```
 
 ## API Reference

@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grounded-ai"
-version = "1.0.5"
+version = "1.0.8"
 description = "A Python package for evaluating LLM application outputs."
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
+license = { file = "LICENSE" }
 requires-python = ">=3.8"
 authors = [
-  { name = "Josh Longenecker", email = "info@groundedai.tech" },
+  { name = "Josh Longenecker", email = "support@groundedai.tech" },
 ]
 keywords = [
   "NLP",

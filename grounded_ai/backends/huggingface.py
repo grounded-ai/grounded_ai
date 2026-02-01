@@ -156,8 +156,8 @@ class HuggingFaceBackend(BaseEvaluator):
                     except Exception:
                         # If fallback also fails (missing fields etc), return the JSON parsing error
                         return EvaluationError(
+                            error_code="JSON_PARSE_ERROR",
                             message=f"Failed to parse structured output from HuggingFace model: {e_json}",
-                            code="JSON_PARSE_ERROR",
                             details={"generated_text": generated_text},
                         )
 
@@ -171,6 +171,6 @@ class HuggingFaceBackend(BaseEvaluator):
 
         except Exception as e:
             return EvaluationError(
+                error_code="BACKEND_ERROR",
                 message=f"Hugging Face Generation Failed: {str(e)}",
-                code="BACKEND_ERROR",
             )

@@ -66,7 +66,7 @@ class TokenUsage(BaseModel):
 class GenAISpan(BaseModel):
     """
     A single LLM invocation following OpenTelemetry GenAI semantic conventions.
-    This is what Blue Guardrails and other OTel platforms expect.
+    This is what Blue Guardrails and other OTel-compatible platforms expect.
     """
 
     # Identity (OpenTelemetry core)
@@ -200,97 +200,101 @@ class GenAIConversation(BaseModel):
             messages.extend(span.gen_ai_output_messages)
         return messages
 
-    def get_reasoning_chain(self) -> List[str]:
+    def get_full_conversation(self) -> List[Dict[str, Any]]:
         """
-        Extract the chronological chain of LLM reasoning.
+        Get the complete conversation history including tool calls and outputs.
+        Deduplicates messages based on content to handle overlapping span histories.
 
-        Returns a list of assistant messages showing the agent's thought process.
-        Useful for analyzing decision-making logic and debugging unexpected behavior.
-
-        Example:
-            ["I need to search for weather data",
-             "Based on the results, Paris is 18°C",
-             "The capital of France is Paris and it's currently 18°C"]
+        Returns:
+            List of message dicts (OpenAI/Anthropic compatible format).
         """
-        reasoning = []
-        for span in self.spans:  # Already sorted chronologically
-            # Extract assistant messages from output
-            for message in span.gen_ai_output_messages:
-                if message.role == "assistant":
-                    # Get text content from parts
-                    for part in message.parts:
-                        if part.type == "text" and part.content:
-                            reasoning.append(part.content)
-        return reasoning
+        messages = []
+        seen = set()
 
-    def get_full_conversation(self) -> List[Dict[str, str]]:
-        """
-        Get the complete conversation in chronological order.
+        for msg in self.get_all_messages():
+            content_parts = []
+            tool_calls = []
+            tool_call_id = None
 
-        Returns all messages (system, user, assistant, tool) as simple dicts.
-        Useful for replaying the entire conversation or feeding to another LLM.
+            for p in msg.parts:
+                if p.type == "text" and p.content:
+                    content_parts.append(p.content)
+                elif p.type == "tool_call_response":
+                    content_parts.append(p.response)
+                    # Link to the call if ID present
+                    if p.id:
+                        tool_call_id = p.id
+                elif p.type == "tool_call":
+                    tool_calls.append(
+                        {
+                            "id": p.id,
+                            "type": "function",
+                            "function": {"name": p.name, "arguments": p.arguments},
+                        }
+                    )
 
-        Example:
-            [{"role": "system", "content": "You are helpful"},
-             {"role": "user", "content": "What's the weather?"},
-             {"role": "assistant", "content": "Let me check..."},
-             {"role": "tool", "content": "{temp: 18}"},
-             {"role": "assistant", "content": "It's 18°C"}]
-        """
-        conversation = []
-        for span in self.spans:
-            # Input messages
-            for message in span.gen_ai_input_messages:
-                for part in message.parts:
-                    if part.type == "text" and part.content:
-                        conversation.append(
-                            {"role": message.role, "content": part.content}
-                        )
-            # Output messages
-            for message in span.gen_ai_output_messages:
-                for part in message.parts:
-                    if part.type == "text" and part.content:
-                        conversation.append(
-                            {"role": message.role, "content": part.content}
-                        )
-        return conversation
+            # Build the dict
+            msg_dict = {
+                "role": msg.role,
+                "content": "\n".join(filter(None, content_parts))
+                if content_parts
+                else None,
+            }
 
-    def get_tool_usage_summary(self) -> List[Dict[str, Any]]:
-        """
-        Extract all tool calls and their results chronologically.
+            if tool_calls:
+                msg_dict["tool_calls"] = tool_calls
+            if tool_call_id:
+                msg_dict["tool_call_id"] = tool_call_id
 
-        Useful for evaluating whether the agent used tools correctly.
+            # Deduplication Signature
+            # We use a tuple of stable representation of key fields
+            # (role, content, num_tool_calls, first_tool_id)
+            # This avoids adding the exact same message twice if spans overlap context.
+            sig = (
+                msg.role,
+                msg_dict["content"],
+                len(tool_calls),
+                tool_calls[0]["id"] if tool_calls else None,
+                tool_call_id,
+            )
 
-        Example:
-            [{"tool": "get_weather",
-              "arguments": {"location": "Paris"},
-              "result": "18°C sunny",
-              "span_id": "abc123"}]
-        """
-        tool_calls = []
-        for span in self.spans:
-            # Find tool calls in output messages
-            for message in span.gen_ai_output_messages:
-                if message.role == "assistant":
-                    for part in message.parts:
-                        if part.type == "tool_call":
-                            tool_calls.append(
-                                {
-                                    "tool": part.name,
-                                    "arguments": part.arguments,
-                                    "call_id": part.id,
-                                    "span_id": span.span_id,
-                                }
-                            )
+            if sig not in seen:
+                seen.add(sig)
+                messages.append(msg_dict)
 
-            # Find tool responses in input messages
-            for message in span.gen_ai_input_messages:
-                if message.role == "tool":
-                    for part in message.parts:
-                        if part.type == "tool_call_response":
-                            # Match with the call
-                            for tc in tool_calls:
-                                if tc.get("call_id") == part.id:
-                                    tc["result"] = part.response
+        return messages
 
-        return tool_calls
+    def to_evaluation_string(self) -> str:
+        """Render the conversation as a token-efficient string for LLM evaluation."""
+        lines = ["## Agent Trace"]
+        conversation = self.get_full_conversation()
+
+        for i, msg in enumerate(conversation):
+            role = msg["role"]
+            content = msg.get("content") or ""
+
+            # Format based on role
+            label = f"[{role.capitalize()}]"
+            line = f"{i + 1}. {label} {content}"
+
+            # Append Tool Calls
+            if "tool_calls" in msg:
+                for tc in msg["tool_calls"]:
+                    func = tc.get("function", {})
+                    name = func.get("name", "unknown")
+                    args = func.get("arguments", {})
+                    # Format args nicely if dict
+                    arg_str = (
+                        ", ".join(f"{k}={v!r}" for k, v in args.items())
+                        if isinstance(args, dict)
+                        else str(args)
+                    )
+                    line += f" → called {name}({arg_str})"
+
+            # Append Tool ID linkage for responses
+            if "tool_call_id" in msg:
+                line += f" (ID: {msg['tool_call_id']})"
+
+            lines.append(line)
+
+        return "\n".join(lines)
