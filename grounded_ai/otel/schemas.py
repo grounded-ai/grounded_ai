@@ -275,7 +275,7 @@ class GenAIConversation(BaseModel):
 
             # Format based on role
             label = f"[{role.capitalize()}]"
-            line = f"{i+1}. {label} {content}"
+            line = f"{i + 1}. {label} {content}"
 
             # Append Tool Calls
             if "tool_calls" in msg:
@@ -284,12 +284,16 @@ class GenAIConversation(BaseModel):
                     name = func.get("name", "unknown")
                     args = func.get("arguments", {})
                     # Format args nicely if dict
-                    arg_str = ", ".join(f"{k}={v!r}" for k, v in args.items()) if isinstance(args, dict) else str(args)
+                    arg_str = (
+                        ", ".join(f"{k}={v!r}" for k, v in args.items())
+                        if isinstance(args, dict)
+                        else str(args)
+                    )
                     line += f" → called {name}({arg_str})"
-            
+
             # Append Tool ID linkage for responses
             if "tool_call_id" in msg:
-                 line += f" (ID: {msg['tool_call_id']})"
+                line += f" (ID: {msg['tool_call_id']})"
 
             lines.append(line)
 
