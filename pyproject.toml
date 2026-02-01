@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grounded-ai"
-version = "1.0.8"
+version = "1.0.9"
 description = "A Python package for evaluating LLM application outputs."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
