@@ -167,18 +167,31 @@ class BedrockBackend(BaseEvaluator):
             response = self.client.converse(**converse_kwargs)
 
             # Parse Response
-            # output -> message -> content -> [0] -> text
-            # The structure is returned as a JSON string in the text field
             if "output" in response and "message" in response["output"]:
                 content = response["output"]["message"]["content"]
-                if content and "text" in content[0]:
-                    response_text = content[0]["text"]
-                    data = json.loads(response_text)
-                    return output_schema(**data)
+                if content:
+                    # Iterate through content blocks to find text or toolUse
+                    # Some models return 'reasoningContent' first, so we can't just check content[0]
+                    for block in content:
+                        if "text" in block:
+                            response_text = block["text"]
+                            try:
+                                data = json.loads(response_text)
+                                return output_schema(**data)
+                            except json.JSONDecodeError:
+                                # Continue looking if this text block isn't valid JSON
+                                # (e.g. might be a generic preamble)
+                                continue
+
+                        elif "toolUse" in block:
+                            tool_use = block["toolUse"]
+                            # We accept the first valid tool use
+                            return output_schema(**tool_use["input"])
 
             return EvaluationError(
                 error_code="EMPTY_RESPONSE",
-                message="Bedrock Converse response contained no content.",
+                message="Bedrock Converse response contained no valid content.",
+                details={"full_response": str(response)},
             )
 
         except Exception as e:
