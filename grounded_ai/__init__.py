@@ -42,7 +42,9 @@ class Evaluator:
             # Strip prefix if needed, or pass full string depending on implementation
             return OpenAIBackend(model_name=model.replace("openai/", ""), **kwargs)
 
-        elif model.startswith("anthropic/") or "claude" in model:
+        elif model.startswith("anthropic/") or (
+            "claude" in model and not model.startswith("bedrock/")
+        ):
             from .backends.anthropic import AnthropicBackend
 
             return AnthropicBackend(
@@ -53,6 +55,11 @@ class Evaluator:
             from .backends.huggingface import HuggingFaceBackend
 
             return HuggingFaceBackend(model_id=model, **kwargs)
+
+        elif model.startswith("bedrock/"):
+            from .backends.bedrock import BedrockBackend
+
+            return BedrockBackend(model_id=model.replace("bedrock/", ""), **kwargs)
 
         else:
             # customizable fallback logic or raise error
