@@ -75,7 +75,6 @@ class BedrockBackend(BaseEvaluator):
         json_schema = output_schema.model_json_schema()
 
         # Strip title to reduce tokens and noise if desired
-        # Strip title to reduce tokens and noise if desired
         if "title" in json_schema:
             del json_schema["title"]
 
