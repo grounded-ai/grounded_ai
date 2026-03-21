@@ -64,7 +64,7 @@ class Evaluator:
         else:
             # customizable fallback logic or raise error
             raise ValueError(
-                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/'."
+                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/'."
             )
 
     def evaluate(

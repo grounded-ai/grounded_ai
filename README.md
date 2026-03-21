@@ -161,16 +161,17 @@ print(result.score) # 0.99
 | **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
 | **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
 | **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
+| **Amazon Bedrock** | ✅ | Access Foundation Models via AWS Bedrock Converse API. |
 | **HuggingFace** | ✅ | Run any generic HF model locally. |
 | **Integrations** | 🏗️ **Planned** | LiteLLM |
 
 ## Backend Capabilities
 
-| Feature | Grounded AI SLM | OpenAI | Anthropic | HuggingFace |
-| :--- | :--- | :--- | :--- | :--- |
-| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
-| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | ⚡ Generic Injection |
+| Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection |
 
 ## API Reference
 
@@ -178,7 +179,7 @@ print(result.score) # 0.99
 
 ```python
 Evaluator(
-    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/..."
+    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/..."
     eval_mode: str,  # Required for Grounded AI SLMs only ("TOXICITY", "HALLUCINATION", "RAG_RELEVANCE")
     **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1)
 )
