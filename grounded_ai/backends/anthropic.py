@@ -8,9 +8,10 @@ from ..base import BaseEvaluator
 from ..schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 try:
-    from anthropic import Anthropic
+    from anthropic import AsyncAnthropic, Anthropic
 except ImportError:
     Anthropic = None
+    AsyncAnthropic = None
 
 
 class AnthropicBackend(BaseEvaluator):
@@ -23,6 +24,7 @@ class AnthropicBackend(BaseEvaluator):
         model_name: str,
         api_key: str = None,
         client: Optional[Any] = None,
+        async_client: Optional[Any] = None,
         input_schema: Type[BaseModel] = EvaluationInput,
         output_schema: Type[BaseModel] = EvaluationOutput,
         **kwargs,
@@ -38,10 +40,16 @@ class AnthropicBackend(BaseEvaluator):
             )
 
         self.model_name = model_name
-        self.client = client or Anthropic(
-            api_key=api_key or os.getenv("ANTHROPIC_API_KEY")
-        )
+        self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        self.client = client or Anthropic(api_key=self._api_key)
+        self._async_client = async_client
         self.kwargs = kwargs
+
+    @property
+    def async_client(self):
+        if self._async_client is None:
+            self._async_client = AsyncAnthropic(api_key=self._api_key)
+        return self._async_client
 
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
@@ -113,6 +121,58 @@ class AnthropicBackend(BaseEvaluator):
 
         except Exception as e:
             # Catch API errors
+            error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
+            error_msg = str(e)
+
+            if hasattr(e, "body") and isinstance(e.body, dict):
+                if "error" in e.body and "message" in e.body["error"]:
+                    error_msg = e.body["error"]["message"]
+                elif "message" in e.body:
+                    error_msg = e.body["message"]
+
+            return EvaluationError(
+                error_code=error_code,
+                message=error_msg,
+                details={"exception_type": type(e).__name__},
+            )
+
+    async def _call_backend_async(
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
+    ) -> Union[BaseModel, EvaluationError]:
+        system_prompt = (
+            self.system_prompt
+            or "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
+        )
+
+        if hasattr(input_data, "formatted_prompt"):
+            user_content = input_data.formatted_prompt
+        else:
+            user_content = str(input_data.model_dump())
+
+        request_kwargs = {**self.kwargs, **kwargs}
+        if "max_tokens" not in request_kwargs:
+            request_kwargs["max_tokens"] = 1024
+
+        try:
+            # beta.messages.parse() accepts a Pydantic model directly via output_format,
+            # so no manual schema manipulation is needed here.
+            response = await self.async_client.beta.messages.parse(
+                model=self.model_name,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+                output_format=output_schema,
+                **request_kwargs,
+            )
+
+            if response.parsed_output is None:
+                return EvaluationError(
+                    error_code="EMPTY_RESPONSE",
+                    message="Anthropic returned no parsed output.",
+                )
+
+            return response.parsed_output
+
+        except Exception as e:
             error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
             error_msg = str(e)
 

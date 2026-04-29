@@ -7,9 +7,10 @@ from ..base import BaseEvaluator
 from ..schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 try:
-    from openai import OpenAI
+    from openai import AsyncOpenAI, OpenAI
 except ImportError:
     OpenAI = None
+    AsyncOpenAI = None
 
 
 class OpenAIBackend(BaseEvaluator):
@@ -22,6 +23,7 @@ class OpenAIBackend(BaseEvaluator):
         model_name: str,
         api_key: str = None,
         client: Optional[Any] = None,
+        async_client: Optional[Any] = None,
         input_schema: Type[BaseModel] = EvaluationInput,
         output_schema: Type[BaseModel] = EvaluationOutput,
         **kwargs,
@@ -37,8 +39,16 @@ class OpenAIBackend(BaseEvaluator):
             )
 
         self.model_name = model_name
-        self.client = client or OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self._api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.client = client or OpenAI(api_key=self._api_key)
+        self._async_client = async_client
         self.kwargs = kwargs
+
+    @property
+    def async_client(self):
+        if self._async_client is None:
+            self._async_client = AsyncOpenAI(api_key=self._api_key)
+        return self._async_client
 
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
@@ -88,6 +98,59 @@ class OpenAIBackend(BaseEvaluator):
             error_msg = str(e)
 
             # Try to extract cleaner message
+            if hasattr(e, "body") and isinstance(e.body, dict):
+                if "error" in e.body and "message" in e.body["error"]:
+                    error_msg = e.body["error"]["message"]
+                elif "message" in e.body:
+                    error_msg = e.body["message"]
+
+            return EvaluationError(
+                error_code=error_code,
+                message=error_msg,
+                details={"exception_type": type(e).__name__},
+            )
+
+    async def _call_backend_async(
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
+    ) -> Union[BaseModel, EvaluationError]:
+        system_prompt = (
+            self.system_prompt
+            or "You are an AI safety evaluator. Analyze the input and provide a structured evaluation."
+        )
+
+        if hasattr(input_data, "formatted_prompt"):
+            user_content = input_data.formatted_prompt
+        else:
+            user_content = str(input_data.model_dump())
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        request_kwargs = {**self.kwargs, **kwargs}
+
+        try:
+            completion = await self.async_client.beta.chat.completions.parse(
+                model=self.model_name,
+                messages=messages,
+                response_format=output_schema,
+                **request_kwargs,
+            )
+
+            message = completion.choices[0].message
+
+            if message.refusal:
+                return EvaluationError(
+                    error_code="MODEL_REFUSAL", message=message.refusal
+                )
+
+            return message.parsed
+
+        except Exception as e:
+            error_code = str(getattr(e, "status_code", "UNKNOWN_ERROR"))
+            error_msg = str(e)
+
             if hasattr(e, "body") and isinstance(e.body, dict):
                 if "error" in e.body and "message" in e.body["error"]:
                     error_msg = e.body["error"]["message"]
