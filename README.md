@@ -184,6 +184,36 @@ print(result.confidence)  # 0.871: |2p - 1|, 0 at a coin flip, 1 at certainty
 
 The server address defaults to `http://127.0.0.1:8000` (override with `base_url=` or `DECIDER_BASE_URL`). As with every backend, `system_prompt` and `output_schema` replace the default question, and generation arguments like `temperature` are accepted; a decision model does not sample, so they have no effect.
 
+**Custom eval modes.** Pass any question with two labels (positive first) instead of a built-in mode. `score` is the probability of the first label.
+
+```python
+brand = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode={
+    "instructions": "Is the response written in our brand voice?",
+    "labels": {
+        "on-brand": "friendly, plain words, no jargon",
+        "off-brand": "formal, salesy or full of jargon",
+    },
+})
+brand.evaluate(response="No worries, we've refunded you. It should show up in a few days.").label
+# 'on-brand' (score 0.924)
+```
+
+**Custom templates.** As on every backend, a custom `base_template` is rendered and becomes what the model reads, so you can put rules or extra context in front of the text:
+
+```python
+rules = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode={
+    "instructions": "Does the text follow the rule?",
+    "labels": {"violates": "the text breaks the rule", "follows": "the text obeys the rule"},
+})
+rules.evaluate(
+    response="The API endpoint defaults to port 8080.",
+    base_template="Rule: services must only listen on port 443.\nText: {{ response }}",
+).label
+# 'violates' (score 0.940)
+```
+
+Without a custom template, the backend sends `context`, `query` and `response` as labelled fields, context first.
+
 Custom schemas work when every required field is a `bool`, a `Literal`/`Enum`, or a `float` bounded to `[0, 1]`; the field's `description` is the question, and all fields are asked in one request. `str` fields are not supported.
 
 On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).

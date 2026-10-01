@@ -112,10 +112,27 @@ class DeciderBackend(BaseEvaluator):
         self._model_checked = False
 
     def set_eval_mode(self, mode) -> None:
-        """Same contract as the SLM backend: a mode name or an EvalMode member."""
+        """A built-in mode name (or an EvalMode member, as on the SLM backend), or a custom mode:
+
+            {"instructions": "Is the response written in our brand voice?",
+             "labels": {"on-brand": "friendly, plain words, no jargon",
+                        "off-brand": "formal, salesy or full of jargon"}}
+
+        A custom mode needs exactly two labels, positive first: `score` is p(first label) and
+        `label` is the first one when score >= threshold. For more than two outcomes, use an
+        output_schema with a Literal field.
+        """
+        if isinstance(mode, dict):
+            self._mode = _custom_mode(mode)
+            self.eval_mode = mode
+            return
         mode = getattr(mode, "value", mode)
         if mode not in EVAL_MODES:
-            raise ValueError(f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}")
+            raise ValueError(
+                f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}, or a custom "
+                '{"instructions": ..., "labels": {positive: description, negative: description}}'
+            )
+        self._mode = EVAL_MODES[mode]
         self.eval_mode = mode
 
     @property
@@ -148,8 +165,13 @@ class DeciderBackend(BaseEvaluator):
 
     # --- Request construction ---
 
-    def _state(self, input_data: BaseModel) -> Dict[str, Any]:
-        # An object state keeps field names as labels ("context: ...", "response: ..."),
+    def _state(self, input_data: BaseModel) -> Union[str, Dict[str, Any]]:
+        # A custom base_template is honored like on every other backend: its rendered text is
+        # what the model reads.
+        template_field = type(input_data).model_fields.get("base_template")
+        if template_field is not None and input_data.base_template != template_field.default:
+            return input_data.formatted_prompt
+        # Default: an object state keeps field names as labels ("context: ...", "response: ..."),
         # so the model sees which text is which without a prompt template.
         data = input_data.model_dump(
             exclude={"base_template", "formatted_prompt"}, exclude_none=True
@@ -162,7 +184,7 @@ class DeciderBackend(BaseEvaluator):
         if issubclass(output_schema, EvaluationOutput):
             if self.system_prompt:
                 return {"verdict": {"type": "noul", "instructions": self.system_prompt}}
-            instructions, _, _, criteria = EVAL_MODES[self.eval_mode]
+            instructions, _, _, criteria = self._mode
             return {"verdict": {"type": "choice", "instructions": instructions, "criteria": criteria}}
 
         questions = {}
@@ -205,7 +227,7 @@ class DeciderBackend(BaseEvaluator):
             if self.system_prompt:
                 p, yes, no = _noul(answers, "verdict"), "yes", "no"
             else:
-                _, yes, no, _ = EVAL_MODES[self.eval_mode]
+                _, yes, no, _ = self._mode
                 p = _prob(answers["verdict"]["probabilities"], yes, no)
             return output_schema(
                 score=p,
@@ -260,6 +282,25 @@ class DeciderBackend(BaseEvaluator):
             return self._parse(response.json()["answers"], output_schema, threshold)
         except Exception as e:
             return _to_error(e)
+
+
+def _custom_mode(mode: Dict[str, Any]) -> Tuple[str, str, str, Dict[str, str]]:
+    """Validate a custom eval mode into the (instructions, positive, negative, criteria) shape."""
+    instructions, labels = mode.get("instructions"), mode.get("labels")
+    unknown = set(mode) - {"instructions", "labels"}
+    if unknown:
+        raise ValueError(f"Custom eval_mode has unknown keys {sorted(unknown)}; expected 'instructions' and 'labels'.")
+    if not isinstance(instructions, str) or not instructions.strip():
+        raise ValueError("Custom eval_mode needs 'instructions': the question the model answers.")
+    if not isinstance(labels, dict) or len(labels) != 2:
+        raise ValueError(
+            "Custom eval_mode needs 'labels' with exactly two entries, positive first, e.g. "
+            '{"on-brand": "...", "off-brand": "..."}. For more outcomes, use an output_schema with a Literal field.'
+        )
+    if not all(isinstance(k, str) and k and isinstance(v, str) for k, v in labels.items()):
+        raise ValueError("Custom eval_mode labels must map label names to description strings.")
+    yes, no = list(labels)
+    return instructions, yes, no, dict(labels)
 
 
 class ModelMismatchError(Exception):
