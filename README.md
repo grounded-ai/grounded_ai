@@ -168,16 +168,21 @@ strands-decider serve StrandsAgents/strands-decider-2B-hobson-v19 --port 8000
 ```
 
 ```python
-evaluator = Evaluator("decider/strands-decider-latest", base_url="http://127.0.0.1:8000")
+# The model name is the checkpoint the server is running; the first call checks it.
+# eval_mode works like the SLM backend: HALLUCINATION (default), TOXICITY or RAG_RELEVANCE.
+evaluator = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode="HALLUCINATION")
 
 result = evaluator.evaluate(
-    response="London is the capital of France.",
-    context="Paris is the capital of France.",
+    query="How long do I have to return an item?",
+    context="Refunds are accepted within 30 days of purchase.",
+    response="You have 90 days to request a refund.",
 )
-print(result.label)       # 'hallucination' or 'faithful'
-print(result.score)       # p(hallucination), read off the model
-print(result.confidence)  # |2p - 1|: 0 at a coin flip, 1 at certainty
+print(result.label)       # 'hallucination'
+print(result.score)       # 0.935: probability of hallucination, read off the model
+print(result.confidence)  # 0.871: |2p - 1|, 0 at a coin flip, 1 at certainty
 ```
+
+The server address defaults to `http://127.0.0.1:8000` (override with `base_url=` or `DECIDER_BASE_URL`). As with every backend, `system_prompt` and `output_schema` replace the default question, and generation arguments like `temperature` are accepted; a decision model does not sample, so they have no effect.
 
 Custom schemas work when every required field is a `bool`, a `Literal`/`Enum`, or a `float` bounded to `[0, 1]`; the field's `description` is the question, and all fields are asked in one request. `str` fields are not supported.
 
