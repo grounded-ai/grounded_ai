@@ -16,10 +16,25 @@ def verdict(p_yes, yes="hallucination", no="faithful"):
                         "probabilities": {yes: p_yes, no: round(1 - p_yes, 4)}}}
 
 
-def make_backend(answers, status=200, seen=None, async_=False, **kwargs):
-    """Backend whose HTTP client answers every request with `answers` and records the body."""
+# /health as `strands-decider serve StrandsAgents/strands-decider-2B-hobson-v19` reports it (trimmed).
+HEALTH = {
+    "status": "ok",
+    "model": "strands-decider-2B-hobson-v19",
+    "checkpoint": "StrandsAgents/strands-decider-2B-hobson-v19",
+    "device": "mps",
+}
+
+
+def make_backend(answers, status=200, seen=None, async_=False, health=HEALTH, health_calls=None,
+                 model_name="strands-decider-2B-hobson-v19", **kwargs):
+    """Backend whose HTTP client answers /health with `health` and /v1/systemone with `answers`.
+    `seen` records /v1/systemone requests; `health_calls` counts /health requests."""
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            if health_calls is not None:
+                health_calls.append(1)
+            return httpx.Response(404) if health is None else httpx.Response(200, json=health)
         if seen is not None:
             seen.append({"url": str(request.url), "headers": request.headers, "body": json.loads(request.content)})
         if status != 200:
@@ -29,7 +44,7 @@ def make_backend(answers, status=200, seen=None, async_=False, **kwargs):
     transport = httpx.MockTransport(handler)
     client_kwargs = {"async_client": httpx.AsyncClient(transport=transport)} if async_ else {}
     return DeciderBackend(
-        model_name="strands-decider-latest",
+        model_name=model_name,
         client=httpx.Client(transport=transport),
         **client_kwargs,
         **kwargs,
@@ -38,9 +53,9 @@ def make_backend(answers, status=200, seen=None, async_=False, **kwargs):
 
 class TestDeciderBackend:
     def test_factory_routing(self):
-        evaluator = Evaluator("decider/strands-decider-latest", base_url="http://127.0.0.1:8010/")
+        evaluator = Evaluator("decider/strands-decider-2B-hobson-v19", base_url="http://127.0.0.1:8010/")
         assert isinstance(evaluator.backend, DeciderBackend)
-        assert evaluator.backend.model_name == "strands-decider-latest"
+        assert evaluator.backend.model_name == "strands-decider-2B-hobson-v19"
         assert evaluator.backend.base_url == "http://127.0.0.1:8010"
 
     def test_request_shape(self):
@@ -52,7 +67,7 @@ class TestDeciderBackend:
         (call,) = seen
         assert call["url"] == "http://127.0.0.1:8000/v1/systemone"
         assert call["headers"]["authorization"] == "Bearer k"
-        assert call["body"]["model"] == "strands-decider-latest"
+        assert call["body"]["model"] == "strands-decider-2B-hobson-v19"
         # Context first: the model reads the evidence before the text it judges.
         assert list(call["body"]["state"]) == ["context", "response"]
         question = call["body"]["questions"]["verdict"]
@@ -120,12 +135,26 @@ class TestDeciderBackend:
         assert isinstance(result, EvaluationError)
         assert result.error_code == "INVALID_REQUEST"
 
-    def test_unknown_runtime_kwarg_refused(self):
-        """Refused rather than silently dropped (CLAUDE.md P0 #1)."""
-        backend = make_backend(verdict(0.5))
-        result = backend.evaluate(EvaluationInput(response="x"), temperature=0.2)
-        assert isinstance(result, EvaluationError)
-        assert "temperature" in result.message
+    def test_generation_kwargs_accepted_like_other_backends(self):
+        """temperature & co. are accepted at init and per call, as on every backend; a decision
+        model does not sample, so they do not change the request."""
+        seen = []
+        backend = make_backend(verdict(0.9), seen=seen, temperature=0.1, max_tokens=50)
+        result = backend.evaluate(EvaluationInput(response="x"), temperature=0.7, top_p=0.9)
+        assert result.label == "hallucination"
+        assert set(seen[0]["body"]) == {"state", "model", "questions"}
+
+    def test_set_eval_mode_like_slm_backend(self):
+        from enum import Enum
+
+        class EvalMode(str, Enum):  # same shape as the SLM backend's enum, which imports torch
+            TOXICITY = "TOXICITY"
+
+        backend = make_backend(verdict(0.9, "toxic", "non-toxic"))
+        backend.set_eval_mode(EvalMode.TOXICITY)
+        assert backend.evaluate(EvaluationInput(response="x")).label == "toxic"
+        with pytest.raises(ValueError):
+            backend.set_eval_mode("NOPE")
 
     def test_http_error(self):
         backend = make_backend("questions: field required", status=422)
@@ -138,6 +167,40 @@ class TestDeciderBackend:
         backend = make_backend({"verdict": {"type": "choice", "probabilities": {"hallucination": -0.2, "faithful": 0.1}}})
         result = backend.evaluate(EvaluationInput(response="x"))
         assert isinstance(result, EvaluationError)
+
+    def test_model_mismatch_refused(self):
+        """The server ignores the request's model field, so a wrong name must fail loudly."""
+        seen = []
+        backend = make_backend(verdict(0.9), seen=seen, model_name="strands-decider-latest")
+        result = backend.evaluate(EvaluationInput(response="x"))
+        assert isinstance(result, EvaluationError)
+        assert result.error_code == "MODEL_MISMATCH"
+        assert "StrandsAgents/strands-decider-2B-hobson-v19" in result.message
+        assert seen == []  # never reached /v1/systemone
+
+    @pytest.mark.parametrize(
+        "name", ["strands-decider-2B-hobson-v19", "StrandsAgents/strands-decider-2B-hobson-v19"]
+    )
+    def test_served_name_or_checkpoint_accepted(self, name):
+        backend = make_backend(verdict(0.9), model_name=name)
+        assert backend.evaluate(EvaluationInput(response="x")).label == "hallucination"
+
+    def test_health_checked_once(self):
+        calls = []
+        backend = make_backend(verdict(0.9), health_calls=calls)
+        backend.evaluate(EvaluationInput(response="x"))
+        backend.evaluate(EvaluationInput(response="y"))
+        assert len(calls) == 1
+
+    def test_server_without_health_is_not_blocked(self):
+        backend = make_backend(verdict(0.9), health=None, model_name="anything")
+        assert backend.evaluate(EvaluationInput(response="x")).label == "hallucination"
+
+    @pytest.mark.asyncio
+    async def test_async_model_mismatch(self):
+        backend = make_backend(verdict(0.9), async_=True, model_name="strands-decider-latest")
+        result = await backend.evaluate_async(EvaluationInput(response="x"))
+        assert result.error_code == "MODEL_MISMATCH"
 
     def test_rounded_probabilities_renormalized(self):
         """Servers round each probability to 4 decimals, so the pair may not sum to exactly 1."""

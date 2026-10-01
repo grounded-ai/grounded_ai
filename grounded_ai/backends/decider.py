@@ -53,8 +53,9 @@ EVAL_MODES = {
 # State field order: the model reads the evidence before the text being judged.
 _STATE_ORDER = ("context", "query", "response")
 
-# Runtime kwargs this backend understands. Anything else is refused, not dropped.
-_RUNTIME_ARGS = {"threshold"}
+# Like every backend, extra kwargs are accepted. A decision model does not sample, so generation
+# arguments (temperature, max_tokens, top_p, ...) have nothing to act on; only `threshold` is read,
+# the same way the SLM backend reads only the generation arguments it supports.
 
 
 class DeciderBackend(BaseEvaluator):
@@ -65,6 +66,11 @@ class DeciderBackend(BaseEvaluator):
     These models do not generate text. Each question is answered with a probability read
     off the model, so the output cannot leave the schema and `confidence` is measured,
     not self-reported.
+
+    The server, not the request, decides which model answers: `strands-decider serve <checkpoint>`
+    loads one checkpoint and ignores the request's `model` field. `model_name` therefore names the
+    checkpoint you expect, and the first call checks it against the server's `/health`, so
+    `Evaluator("decider/<name>")` cannot silently run a different model.
     """
 
     def __init__(
@@ -90,13 +96,6 @@ class DeciderBackend(BaseEvaluator):
             raise ImportError(
                 "httpx package is not installed. Please install it via `pip install grounded-ai[decider]`."
             )
-        if eval_mode not in EVAL_MODES:
-            raise ValueError(
-                f"Unknown eval_mode '{eval_mode}'. Supported: {', '.join(EVAL_MODES)}."
-            )
-        unknown = set(kwargs) - _RUNTIME_ARGS
-        if unknown:
-            raise TypeError(f"Unsupported arguments for DeciderBackend: {sorted(unknown)}")
 
         self.model_name = model_name
         self.base_url = (
@@ -104,18 +103,48 @@ class DeciderBackend(BaseEvaluator):
         ).rstrip("/")
         api_key = api_key or os.getenv("DECIDER_API_KEY")
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self.eval_mode = eval_mode
+        self.set_eval_mode(eval_mode)
         self.threshold = threshold
         self._timeout = timeout
         self.client = client or httpx.Client(timeout=timeout)
         self._async_client = async_client
         self.kwargs = kwargs
+        self._model_checked = False
+
+    def set_eval_mode(self, mode) -> None:
+        """Same contract as the SLM backend: a mode name or an EvalMode member."""
+        mode = getattr(mode, "value", mode)
+        if mode not in EVAL_MODES:
+            raise ValueError(f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}")
+        self.eval_mode = mode
 
     @property
     def async_client(self):
         if self._async_client is None:
             self._async_client = httpx.AsyncClient(timeout=self._timeout)
         return self._async_client
+
+    # --- Model check ---
+
+    def _check_model(self, response: Any) -> None:
+        """Compare model_name with what /health says the server is running. Runs once."""
+        if response.status_code == 404:
+            # A /v1/systemone server without /health: nothing to check against.
+            self._model_checked = True
+            return
+        response.raise_for_status()
+        health = response.json()
+        served, checkpoint = health.get("model"), health.get("checkpoint")
+        names = {n for n in (served, checkpoint) if n}
+        if checkpoint:
+            names.add(checkpoint.rstrip("/").split("/")[-1])
+        if names and self.model_name not in names:
+            raise ModelMismatchError(
+                f"Server at {self.base_url} is running '{checkpoint or served}', "
+                f"but the evaluator asked for '{self.model_name}'. "
+                f"Use Evaluator(\"decider/{served or checkpoint}\") or serve the checkpoint you want."
+            )
+        self._model_checked = True
 
     # --- Request construction ---
 
@@ -160,9 +189,6 @@ class DeciderBackend(BaseEvaluator):
         self, input_data: BaseModel, output_schema: Type[BaseModel], kwargs: Dict[str, Any]
     ) -> Tuple[Dict[str, Any], float]:
         request_kwargs = {**self.kwargs, **kwargs}
-        unknown = set(request_kwargs) - _RUNTIME_ARGS
-        if unknown:
-            raise TypeError(f"Unsupported arguments for DeciderBackend: {sorted(unknown)}")
         body = {
             "state": self._state(input_data),
             "model": self.model_name,
@@ -208,6 +234,8 @@ class DeciderBackend(BaseEvaluator):
     ) -> Union[BaseModel, EvaluationError]:
         try:
             body, threshold = self._request(input_data, output_schema, kwargs)
+            if not self._model_checked:
+                self._check_model(self.client.get(f"{self.base_url}/health", headers=self._headers))
             response = self.client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
@@ -221,6 +249,10 @@ class DeciderBackend(BaseEvaluator):
     ) -> Union[BaseModel, EvaluationError]:
         try:
             body, threshold = self._request(input_data, output_schema, kwargs)
+            if not self._model_checked:
+                self._check_model(
+                    await self.async_client.get(f"{self.base_url}/health", headers=self._headers)
+                )
             response = await self.async_client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
@@ -228,6 +260,10 @@ class DeciderBackend(BaseEvaluator):
             return self._parse(response.json()["answers"], output_schema, threshold)
         except Exception as e:
             return _to_error(e)
+
+
+class ModelMismatchError(Exception):
+    """The server is serving a different checkpoint than the evaluator was configured for."""
 
 
 def _field_kind(annotation: Any, metadata: list) -> Tuple[str, tuple]:
@@ -275,6 +311,12 @@ def _to_error(e: Exception) -> EvaluationError:
         return EvaluationError(
             error_code=str(e.response.status_code),
             message=str(detail),
+            details={"exception_type": type(e).__name__},
+        )
+    if isinstance(e, ModelMismatchError):
+        return EvaluationError(
+            error_code="MODEL_MISMATCH",
+            message=str(e),
             details={"exception_type": type(e).__name__},
         )
     if httpx is not None and isinstance(e, httpx.TransportError):
