@@ -29,7 +29,7 @@ jobs:
       run: |
         source $HOME/.cargo/env
         uv pip install --system -e .
-        uv pip install --system pytest pytest-asyncio ruff
+        uv pip install --system pytest pytest-asyncio httpx ruff
 
     - name: Lint with Ruff
       run: |
