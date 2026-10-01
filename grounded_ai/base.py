@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Type, Union
 
@@ -46,15 +47,34 @@ class BaseEvaluator(ABC):
         Returns:
             An instance of the effective output_schema or EvaluationError on failure.
         """
-        # 1. Standardize Input
         if isinstance(input_data, dict):
             input_data = self.input_schema(**input_data)
-
-        # 2. Resolve Output Schema
         target_schema = output_schema or self.output_schema
-
-        # 3. Delegate to specific backend implementation
         return self._call_backend(input_data, target_schema, **kwargs)
+
+    async def evaluate_async(
+        self,
+        input_data: Union[BaseModel, Dict[str, Any]],
+        output_schema: Type[BaseModel] = None,
+        **kwargs,
+    ) -> Union[BaseModel, EvaluationError]:
+        """
+        Async version of evaluate(). Backends with native async clients override
+        _call_backend_async; others fall back to running _call_backend in a thread pool.
+        """
+        if isinstance(input_data, dict):
+            input_data = self.input_schema(**input_data)
+        target_schema = output_schema or self.output_schema
+        return await self._call_backend_async(input_data, target_schema, **kwargs)
+
+    async def _call_backend_async(
+        self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
+    ) -> Union[BaseModel, EvaluationError]:
+        """
+        Default async implementation: runs the sync _call_backend in a thread pool.
+        Backends with native async clients (OpenAI, Anthropic) override this.
+        """
+        return await asyncio.to_thread(self._call_backend, input_data, output_schema, **kwargs)
 
     @abstractmethod
     def _call_backend(

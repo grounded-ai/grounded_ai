@@ -54,3 +54,8 @@ slm = [
 [project.urls]
 "Homepage" = "https://github.com/grounded-ai/grounded_ai"
 "Bug Tracker" = "https://github.com/grounded-ai/grounded_ai/issues"
+
+[tool.ruff.lint]
+# Pin the rule set CI has always enforced (ruff's defaults before 0.16). CI installs ruff
+# unpinned, and 0.16 widened the defaults, failing main on 152 pre-existing findings.
+select = ["E4", "E7", "E9", "F"]

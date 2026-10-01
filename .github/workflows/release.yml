@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build ruff pytest
+          pip install build ruff pytest pytest-asyncio
           pip install -e .
 
       - name: Lint with Ruff
