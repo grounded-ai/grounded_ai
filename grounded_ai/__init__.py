@@ -60,9 +60,14 @@ class Evaluator:
 
             return BedrockBackend(model_id=model.replace("bedrock/", ""), **kwargs)
 
+        elif model.startswith("decider/"):
+            from .backends.decider import DeciderBackend
+
+            return DeciderBackend(model_name=model.replace("decider/", ""), **kwargs)
+
         else:
             raise ValueError(
-                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/'."
+                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/', 'decider/'."
             )
 
     def _prepare_input(
