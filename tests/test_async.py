@@ -16,7 +16,7 @@ mock_anthropic = MagicMock()
 mock_anthropic.__spec__ = MagicMock()
 sys.modules["anthropic"] = mock_anthropic
 
-from grounded_ai import AsyncEvaluator, EvaluationInput, EvaluationOutput, Evaluator  # noqa: E402
+from grounded_ai import AsyncEvaluator, EvaluationOutput, Evaluator  # noqa: E402
 from grounded_ai.backends.anthropic import AnthropicBackend  # noqa: E402
 from grounded_ai.backends.openai import OpenAIBackend  # noqa: E402
 from grounded_ai.schemas import EvaluationError  # noqa: E402
