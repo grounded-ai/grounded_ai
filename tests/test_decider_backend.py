@@ -202,6 +202,54 @@ class TestDeciderBackend:
         result = await backend.evaluate_async(EvaluationInput(response="x"))
         assert result.error_code == "MODEL_MISMATCH"
 
+    BRAND = {
+        "instructions": "Is the response written in our brand voice?",
+        "labels": {"on-brand": "friendly, plain words, no jargon", "off-brand": "formal, salesy or full of jargon"},
+    }
+
+    def test_custom_eval_mode(self):
+        seen = []
+        backend = make_backend(verdict(0.8, "on-brand", "off-brand"), seen=seen, eval_mode=self.BRAND)
+        result = backend.evaluate(EvaluationInput(response="Hey! Here's how to fix it."))
+        question = seen[0]["body"]["questions"]["verdict"]
+        assert question == {"type": "choice", "instructions": self.BRAND["instructions"], "criteria": self.BRAND["labels"]}
+        assert (result.label, result.score) == ("on-brand", 0.8)
+        assert backend.evaluate(EvaluationInput(response="x"), threshold=0.9).label == "off-brand"
+
+    def test_custom_eval_mode_via_evaluator_and_set_eval_mode(self):
+        evaluator = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode=self.BRAND)
+        assert evaluator.backend.eval_mode == self.BRAND
+        backend = make_backend(verdict(0.2, "on-brand", "off-brand"))
+        backend.set_eval_mode(self.BRAND)
+        assert backend.evaluate(EvaluationInput(response="x")).label == "off-brand"
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            {"labels": {"a": "", "b": ""}},  # no instructions
+            {"instructions": "Q?", "labels": {"a": "", "b": "", "c": ""}},  # three labels
+            {"instructions": "Q?", "labels": {"a": ""}},  # one label
+            {"instructions": "Q?", "labels": {"a": None, "b": ""}},  # non-str description
+            {"instructions": "Q?", "labels": {"a": "", "b": ""}, "criteria": {}},  # unknown key
+        ],
+    )
+    def test_invalid_custom_eval_mode(self, mode):
+        with pytest.raises(ValueError):
+            make_backend({}, eval_mode=mode)
+
+    def test_custom_base_template_is_the_state(self):
+        """Like every other backend, a custom base_template's rendered text is what the model reads."""
+        seen = []
+        backend = make_backend(verdict(0.9), seen=seen)
+        backend.evaluate(EvaluationInput(response="Port 8080.", base_template="Rule: ports must be 443. Text: {{ response }}"))
+        assert seen[0]["body"]["state"] == "Rule: ports must be 443. Text: Port 8080."
+
+    def test_default_template_keeps_labelled_fields(self):
+        seen = []
+        backend = make_backend(verdict(0.9), seen=seen)
+        backend.evaluate(EvaluationInput(response="r", context="c"))
+        assert seen[0]["body"]["state"] == {"context": "c", "response": "r"}
+
     def test_rounded_probabilities_renormalized(self):
         """Servers round each probability to 4 decimals, so the pair may not sum to exactly 1."""
         backend = make_backend({"verdict": {"type": "choice", "probabilities": {"hallucination": 0.6, "faithful": 0.3}}})
