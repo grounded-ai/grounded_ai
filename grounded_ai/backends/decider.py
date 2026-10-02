@@ -1,6 +1,9 @@
 import enum
+import json
 import os
+import types
 import typing
+import warnings
 from typing import Any, Dict, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel
@@ -54,8 +57,20 @@ EVAL_MODES = {
 _STATE_ORDER = ("context", "query", "response")
 
 # Like every backend, extra kwargs are accepted. A decision model does not sample, so generation
-# arguments (temperature, max_tokens, top_p, ...) have nothing to act on; only `threshold` is read,
-# the same way the SLM backend reads only the generation arguments it supports.
+# arguments have nothing to act on and are dropped. `threshold` and `eval_mode` are read. Anything
+# else is probably a typo and gets a warning instead of silently doing nothing.
+_IGNORED_KWARGS = {
+    "temperature", "max_tokens", "max_new_tokens", "max_completion_tokens", "top_p", "top_k",
+    "do_sample", "repetition_penalty", "frequency_penalty", "presence_penalty", "seed", "stop",
+}
+_READ_KWARGS = {"threshold", "eval_mode"}
+
+# Fields of EvaluationOutput that the verdict question fills (reasoning stays None: nothing is generated).
+_VERDICT_FIELDS = {"score", "label", "confidence", "reasoning"}
+_VERDICT_KEY = "verdict"
+# The server's `score` question takes 2 to 10 ordered levels.
+_MIN_LEVELS, _MAX_LEVELS = 2, 10
+_UNION_TYPES = (Union,) + ((types.UnionType,) if hasattr(types, "UnionType") else ())
 
 
 class DeciderBackend(BaseEvaluator):
@@ -66,6 +81,26 @@ class DeciderBackend(BaseEvaluator):
     These models do not generate text. Each question is answered with a probability read
     off the model, so the output cannot leave the schema and `confidence` is measured,
     not self-reported.
+
+    The output schema maps one-to-one onto what the model returns. `/v1/systemone` has three
+    question types, and every field of an output schema is exactly one of them:
+
+        noul    float in [0, 1]                 -> the probability the statement is true
+                bool                            -> that probability >= threshold
+        choice  Literal / Enum                  -> the option the model picked
+        score   int or float with ge/le bounds  -> a rating over 2-10 ordered levels
+
+    The field's `description` is the question (the field name is used when there is none).
+    Nothing else can be answered: a required field of any other type is refused with
+    INVALID_REQUEST, and one with a default is left at its default. The stock EvaluationOutput
+    is one choice question, set by `eval_mode`: score = p(positive label), label, confidence.
+
+    The input side is free: the request's `state` is a string or a JSON object, so any input
+    model works. Its fields are sent as an object, or its own `formatted_prompt` / `base_template`
+    is rendered and sent as text.
+
+    There is no system message in the `/v1/systemone` contract, so `system_prompt` is not sent.
+    What the model is asked comes from `eval_mode` and the field descriptions.
 
     The server, not the request, decides which model answers: `strands-decider serve <checkpoint>`
     loads one checkpoint and ignores the request's `model` field. `model_name` therefore names the
@@ -78,7 +113,7 @@ class DeciderBackend(BaseEvaluator):
         model_name: str,
         base_url: str = None,
         api_key: str = None,
-        eval_mode: str = "HALLUCINATION",
+        eval_mode: Any = None,
         threshold: float = 0.5,
         timeout: float = 30.0,
         client: Optional[Any] = None,
@@ -103,13 +138,20 @@ class DeciderBackend(BaseEvaluator):
         ).rstrip("/")
         api_key = api_key or os.getenv("DECIDER_API_KEY")
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        self.set_eval_mode(eval_mode)
-        self.threshold = threshold
+        if self.system_prompt:
+            warnings.warn(
+                "system_prompt is not sent to a decision model: /v1/systemone has no system message. "
+                "Put the question in eval_mode or in the output schema's field descriptions.",
+                stacklevel=3,
+            )
+        self.set_eval_mode(eval_mode if eval_mode is not None else "HALLUCINATION")
+        self.threshold = _check_threshold(threshold)
         self._timeout = timeout
         self.client = client or httpx.Client(timeout=timeout)
         self._async_client = async_client
         self.kwargs = kwargs
         self._model_checked = False
+        self._max_length = None  # the served model's token window, from /health
 
     def set_eval_mode(self, mode) -> None:
         """A built-in mode name (or an EvalMode member, as on the SLM backend), or a custom mode:
@@ -120,20 +162,9 @@ class DeciderBackend(BaseEvaluator):
 
         A custom mode needs exactly two labels, positive first: `score` is p(first label) and
         `label` is the first one when score >= threshold. For more than two outcomes, use an
-        output_schema with a Literal field.
+        output_schema with a Literal field. `eval_mode=` can also be passed to a single evaluate() call.
         """
-        if isinstance(mode, dict):
-            self._mode = _custom_mode(mode)
-            self.eval_mode = mode
-            return
-        mode = getattr(mode, "value", mode)
-        if mode not in EVAL_MODES:
-            raise ValueError(
-                f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}, or a custom "
-                '{"instructions": ..., "labels": {positive: description, negative: description}}'
-            )
-        self._mode = EVAL_MODES[mode]
-        self.eval_mode = mode
+        self._mode, self.eval_mode = _resolve_mode(mode)
 
     @property
     def async_client(self):
@@ -150,7 +181,14 @@ class DeciderBackend(BaseEvaluator):
             self._model_checked = True
             return
         response.raise_for_status()
-        health = response.json()
+        try:
+            health = response.json()
+        except ValueError:
+            health = None
+        if not isinstance(health, dict):
+            # /health exists but is not the strands-decider JSON: nothing to check against.
+            self._model_checked = True
+            return
         served, checkpoint = health.get("model"), health.get("checkpoint")
         names = {n for n in (served, checkpoint) if n}
         if checkpoint:
@@ -161,93 +199,168 @@ class DeciderBackend(BaseEvaluator):
                 f"but the evaluator asked for '{self.model_name}'. "
                 f"Use Evaluator(\"decider/{served or checkpoint}\") or serve the checkpoint you want."
             )
+        if isinstance(health.get("max_length"), int):
+            self._max_length = health["max_length"]
         self._model_checked = True
+
+    def _warn_if_long(self, state: Union[str, Dict[str, Any]]) -> None:
+        """The server cuts a state that overflows the model's window from the end, without an
+        error, so the last field (the response being judged) is what goes missing. There is no
+        tokenizer here, so this is a rough guard: over ~4 characters per token of window."""
+        if not self._max_length:
+            return
+        chars = len(state) if isinstance(state, str) else len(json.dumps(state, ensure_ascii=False))
+        if chars > 4 * self._max_length:
+            warnings.warn(
+                f"Decider input is about {chars} characters but the served model reads at most "
+                f"{self._max_length} tokens; the server truncates the end of the input, so the text "
+                "being judged may be cut off. Shorten the context.",
+                stacklevel=2,
+            )
 
     # --- Request construction ---
 
     def _state(self, input_data: BaseModel) -> Union[str, Dict[str, Any]]:
-        # A custom base_template is honored like on every other backend: its rendered text is
-        # what the model reads.
-        template_field = type(input_data).model_fields.get("base_template")
-        if template_field is not None and input_data.base_template != template_field.default:
-            return input_data.formatted_prompt
-        # Default: an object state keeps field names as labels ("context: ...", "response: ..."),
-        # so the model sees which text is which without a prompt template.
+        # Like every other backend, the input model's own prompt formatting is honored: a custom
+        # base_template (per instance or as a subclass default), or a model that defines its own
+        # formatted_prompt. Its rendered text is what the model reads.
+        if hasattr(input_data, "formatted_prompt"):
+            stock_prompt = getattr(type(input_data), "formatted_prompt", None) is getattr(
+                EvaluationInput, "formatted_prompt", None
+            )
+            stock_template = (
+                getattr(input_data, "base_template", None)
+                == EvaluationInput.model_fields["base_template"].default
+            )
+            if not (stock_prompt and stock_template):
+                state = input_data.formatted_prompt
+                if not isinstance(state, str) or not state.strip():
+                    raise ValueError("The input's formatted_prompt is empty: there is nothing to evaluate.")
+                return state
+        # Stock template: an object state keeps the field names as keys, so the model sees which
+        # text is which without a prompt template.
         data = input_data.model_dump(
-            exclude={"base_template", "formatted_prompt"}, exclude_none=True
+            mode="json", exclude={"base_template", "formatted_prompt"}, exclude_none=True
         )
+        if not data:
+            raise ValueError("The input has no fields set: there is nothing to evaluate.")
         ordered = {k: data.pop(k) for k in _STATE_ORDER if k in data}
         return {**ordered, **data}
 
-    def _questions(self, output_schema: Type[BaseModel]) -> Dict[str, Dict[str, Any]]:
-        """One question for EvaluationOutput, or one per field of a custom schema."""
-        if issubclass(output_schema, EvaluationOutput):
-            if self.system_prompt:
-                return {"verdict": {"type": "noul", "instructions": self.system_prompt}}
-            instructions, _, _, criteria = self._mode
-            return {"verdict": {"type": "choice", "instructions": instructions, "criteria": criteria}}
+    def _verdict(self, output_schema: Type[BaseModel], mode: tuple) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """The one choice question behind score/label/confidence of an EvaluationOutput.
 
-        questions = {}
-        for name, field in output_schema.model_fields.items():
-            kind, options = _field_kind(field.annotation, field.metadata)
-            if kind == "skip":
-                if field.is_required():
-                    raise ValueError(
-                        f"Field '{name}' ({field.annotation}) cannot be answered by a decision model; "
-                        "use bool, Literal/Enum, or a float bounded to [0, 1]."
-                    )
+        Returns (question, labels); `labels` maps the mode's two labels, positive first, to the
+        values the schema's `label` field takes.
+        """
+        instructions, yes, no, criteria = mode
+        kind, options = _field_spec("label", output_schema.model_fields["label"], strict=False)
+        labels = {yes: yes, no: no}
+        if kind == "choice":
+            if set(options) != {yes, no}:
+                raise ValueError(
+                    f"{output_schema.__name__}.label allows {sorted(options)}, but the eval mode answers "
+                    f"'{yes}' or '{no}'. Pass a custom eval_mode with those labels."
+                )
+            labels = {yes: options[yes], no: options[no]}
+        return {"type": "choice", "instructions": instructions, "criteria": criteria}, labels
+
+    def _field_questions(self, schema: Type[BaseModel], skip: set, out: Dict[str, Dict[str, Any]]) -> None:
+        """One question per answerable field of `schema`, of the type the field maps to."""
+        for name, field in schema.model_fields.items():
+            if name in skip:
                 continue
-            if not field.description:
-                raise ValueError(f"Field '{name}' needs a description: it is the question asked.")
-            question = {"type": "noul" if kind != "choice" else "choice", "instructions": field.description}
+            kind, info = _field_spec(name, field)
+            if kind == "skip":
+                continue
+            text = field.description or name.replace("_", " ")
             if kind == "choice":
-                question["criteria"] = {str(o): "" for o in options}
-            questions[name] = question
-        if not questions:
-            raise ValueError(f"{output_schema.__name__} has no fields a decision model can answer.")
-        return questions
+                out[name] = {"type": "choice", "instructions": text, "criteria": {o: "" for o in info}}
+            elif kind == "level":
+                low, high, _ = info
+                out[name] = {"type": "score", "instructions": text, "criteria": [str(v) for v in range(low, high + 1)]}
+            else:  # bool, prob
+                out[name] = {"type": "noul", "instructions": text}
 
     def _request(
         self, input_data: BaseModel, output_schema: Type[BaseModel], kwargs: Dict[str, Any]
-    ) -> Tuple[Dict[str, Any], float]:
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """The request body, and what _parse needs to read the answer back."""
         request_kwargs = {**self.kwargs, **kwargs}
-        body = {
-            "state": self._state(input_data),
-            "model": self.model_name,
-            "questions": self._questions(output_schema),
-        }
-        return body, request_kwargs.get("threshold", self.threshold)
+        unknown = set(request_kwargs) - _IGNORED_KWARGS - _READ_KWARGS
+        if unknown:
+            warnings.warn(
+                f"DeciderBackend ignores unknown argument(s) {sorted(unknown)}; "
+                f"it reads {sorted(_READ_KWARGS)}.",
+                stacklevel=2,
+            )
+        plan = {"threshold": _check_threshold(request_kwargs.get("threshold", self.threshold)), "labels": None}
+        questions: Dict[str, Dict[str, Any]] = {}
+        skip = set()
+        if issubclass(output_schema, EvaluationOutput):
+            mode = self._mode
+            if request_kwargs.get("eval_mode") is not None:
+                mode = _resolve_mode(request_kwargs["eval_mode"])[0]
+            questions[_VERDICT_KEY], plan["labels"] = self._verdict(output_schema, mode)
+            skip = _VERDICT_FIELDS
+            if _VERDICT_KEY in output_schema.model_fields:
+                raise ValueError(f"'{_VERDICT_KEY}' is reserved on an EvaluationOutput schema; rename the field.")
+        elif request_kwargs.get("eval_mode") is not None:
+            raise ValueError(
+                "eval_mode fills EvaluationOutput's score/label/confidence; "
+                f"{output_schema.__name__} is asked field by field instead."
+            )
+        # Fields a subclass adds to EvaluationOutput are asked too, in the same request.
+        self._field_questions(output_schema, skip, questions)
+        if not questions:
+            raise ValueError(f"{output_schema.__name__} has no fields a decision model can answer.")
+        body = {"state": self._state(input_data), "model": self.model_name, "questions": questions}
+        return body, plan
 
     # --- Response parsing ---
 
-    def _parse(
-        self, answers: Dict[str, Any], output_schema: Type[BaseModel], threshold: float
-    ) -> BaseModel:
-        if issubclass(output_schema, EvaluationOutput):
-            if self.system_prompt:
-                p, yes, no = _noul(answers, "verdict"), "yes", "no"
-            else:
-                _, yes, no, _ = self._mode
-                p = _prob(answers["verdict"]["probabilities"], yes, no)
-            return output_schema(
-                score=p,
-                label=yes if p >= threshold else no,
-                # Decider's derive_confidence, (N * p_max - 1) / (N - 1), at N = 2: 0 at p=0.5, 1 at certainty.
-                confidence=abs(2 * p - 1),
-            )
-
+    def _field_values(
+        self, schema: Type[BaseModel], skip: set, answers: Dict[str, Any], threshold: float
+    ) -> Dict[str, Any]:
         values = {}
-        for name, field in output_schema.model_fields.items():
-            if name not in answers:
+        for name, field in schema.model_fields.items():
+            if name in skip:
                 continue
-            kind, _ = _field_kind(field.annotation, field.metadata)
+            kind, info = _field_spec(name, field)
             if kind == "choice":
-                values[name] = answers[name]["choice"]
+                values[name] = info[answers[name]["choice"]]
+            elif kind == "level":
+                low, _, is_int = info
+                values[name] = low + (_top_level(answers[name]) if is_int else float(answers[name]["score"]))
             elif kind == "bool":
                 values[name] = _noul(answers, name) >= threshold
-            else:
+            elif kind == "prob":
                 values[name] = _noul(answers, name)
-        return output_schema(**values)
+        return values
+
+    def _parse(self, answers: Dict[str, Any], output_schema: Type[BaseModel], plan: Dict[str, Any]) -> BaseModel:
+        threshold = plan["threshold"]
+        if not issubclass(output_schema, EvaluationOutput):
+            return output_schema(**self._field_values(output_schema, set(), answers, threshold))
+
+        labels = plan["labels"]
+        yes, no = list(labels)
+        p = _prob(answers[_VERDICT_KEY]["probabilities"], yes, no)
+        extra = self._field_values(output_schema, _VERDICT_FIELDS, answers, threshold)
+        return output_schema(
+            score=p,
+            label=labels[yes] if p >= threshold else labels[no],
+            # Decider's derive_confidence, (N * p_max - 1) / (N - 1), at N = 2: 0 at p=0.5, 1 at certainty.
+            confidence=abs(2 * p - 1),
+            **extra,
+        )
+
+    def _read(self, response: Any, output_schema: Type[BaseModel], plan: Dict[str, Any]) -> BaseModel:
+        response.raise_for_status()
+        try:
+            return self._parse(response.json()["answers"], output_schema, plan)
+        except (KeyError, TypeError, ValueError) as e:
+            raise ResponseError(f"Could not read the server's answer into {output_schema.__name__}: {e!r}") from e
 
     # --- Calls ---
 
@@ -255,14 +368,14 @@ class DeciderBackend(BaseEvaluator):
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         try:
-            body, threshold = self._request(input_data, output_schema, kwargs)
+            body, plan = self._request(input_data, output_schema, kwargs)
             if not self._model_checked:
                 self._check_model(self.client.get(f"{self.base_url}/health", headers=self._headers))
+            self._warn_if_long(body["state"])
             response = self.client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            response.raise_for_status()
-            return self._parse(response.json()["answers"], output_schema, threshold)
+            return self._read(response, output_schema, plan)
         except Exception as e:
             return _to_error(e)
 
@@ -270,18 +383,38 @@ class DeciderBackend(BaseEvaluator):
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
     ) -> Union[BaseModel, EvaluationError]:
         try:
-            body, threshold = self._request(input_data, output_schema, kwargs)
+            body, plan = self._request(input_data, output_schema, kwargs)
             if not self._model_checked:
                 self._check_model(
                     await self.async_client.get(f"{self.base_url}/health", headers=self._headers)
                 )
+            self._warn_if_long(body["state"])
             response = await self.async_client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            response.raise_for_status()
-            return self._parse(response.json()["answers"], output_schema, threshold)
+            return self._read(response, output_schema, plan)
         except Exception as e:
             return _to_error(e)
+
+
+def _resolve_mode(mode: Any) -> Tuple[tuple, Any]:
+    """(the (instructions, positive, negative, criteria) tuple, the name or dict it came from)."""
+    if isinstance(mode, dict):
+        return _custom_mode(mode), mode
+    mode = getattr(mode, "value", mode)
+    name = mode.upper() if isinstance(mode, str) else mode  # case-insensitive, as on the SLM backend
+    if name not in EVAL_MODES:
+        raise ValueError(
+            f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}, or a custom "
+            '{"instructions": ..., "labels": {positive: description, negative: description}}'
+        )
+    return EVAL_MODES[name], name
+
+
+def _check_threshold(threshold: Any) -> float:
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
+        raise ValueError(f"threshold must be a number in [0, 1], got {threshold!r}.")
+    return float(threshold)
 
 
 def _custom_mode(mode: Dict[str, Any]) -> Tuple[str, str, str, Dict[str, str]]:
@@ -307,25 +440,82 @@ class ModelMismatchError(Exception):
     """The server is serving a different checkpoint than the evaluator was configured for."""
 
 
-def _field_kind(annotation: Any, metadata: list) -> Tuple[str, tuple]:
-    """Map a field type to a question: 'bool', 'prob' (float in [0, 1]), 'choice', or 'skip'."""
-    origin = typing.get_origin(annotation)
-    if origin is Union:
+class ResponseError(Exception):
+    """The server answered, but the answer could not be read into the output schema."""
+
+
+def _options(annotation: Any) -> Optional[Dict[str, Any]]:
+    """{option text sent to the model: value handed to the schema} for a Literal or Enum."""
+    if typing.get_origin(annotation) is typing.Literal:
+        values = [v.value if isinstance(v, enum.Enum) else v for v in typing.get_args(annotation)]
+    elif isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        values = [m.value for m in annotation]
+    else:
+        return None
+    options = {str(v): v for v in values}
+    if len(options) != len(values):
+        raise ValueError(f"Options {values} are not distinct once written as text.")
+    return options
+
+
+def _bound(metadata: list, inclusive: str, exclusive: str, step: int) -> Optional[float]:
+    """A field's lower or upper bound from its ge/gt or le/lt constraint."""
+    for m in metadata:
+        if getattr(m, inclusive, None) is not None:
+            return getattr(m, inclusive)
+    for m in metadata:
+        if getattr(m, exclusive, None) is not None:
+            return getattr(m, exclusive) + step
+    return None
+
+
+def _field_spec(name: str, field: Any, strict: bool = True) -> Tuple[str, Any]:
+    """Map a field to the question type that answers it: (kind, info).
+
+        noul    'bool'    yes/no                     'prob'  float in [0, 1]
+        choice  'choice'  {option text: value}
+        score   'level'   (low, high, is_int) rating
+        'skip'  not answerable, left at its default
+
+    A required field that is not answerable raises, unless `strict` is False.
+    """
+    annotation, metadata = field.annotation, field.metadata
+    if typing.get_origin(annotation) in _UNION_TYPES:  # Optional[X] and X | None are asked as X
         args = [a for a in typing.get_args(annotation) if a is not type(None)]
         if len(args) == 1:
-            return _field_kind(args[0], metadata)
+            annotation = args[0]
+
     if annotation is bool:
-        return "bool", ()
-    if origin is typing.Literal:
-        return "choice", typing.get_args(annotation)
-    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
-        return "choice", tuple(m.value for m in annotation)
-    if annotation is float:
-        ge = next((m.ge for m in metadata if getattr(m, "ge", None) is not None), None)
-        le = next((m.le for m in metadata if getattr(m, "le", None) is not None), None)
-        if ge == 0 and le == 1:
-            return "prob", ()
-    return "skip", ()
+        return "bool", None
+    options = _options(annotation)
+    if options is not None:
+        if len(options) < 2:
+            raise ValueError(f"Field '{name}' needs at least two options: a choice question picks one of several.")
+        return "choice", options
+    if annotation in (int, float):
+        low, high = _bound(metadata, "ge", "gt", 1), _bound(metadata, "le", "lt", -1)
+        if annotation is float and low == 0 and high == 1 and not any(
+            getattr(m, "gt", None) is not None or getattr(m, "lt", None) is not None for m in metadata
+        ):
+            return "prob", None
+        if low is not None and high is not None and float(low).is_integer() and float(high).is_integer():
+            if _MIN_LEVELS <= int(high) - int(low) + 1 <= _MAX_LEVELS:
+                return "level", (int(low), int(high), annotation is int)
+    if strict and field.is_required():
+        raise ValueError(
+            f"Field '{name}' ({field.annotation}) does not map to a decision model answer. Use bool or a "
+            "float bounded to [0, 1] (noul), Literal/Enum (choice), or an int or float bounded to a range "
+            f"of {_MIN_LEVELS}-{_MAX_LEVELS} values (score); or give the field a default to leave it unanswered."
+        )
+    return "skip", None
+
+
+def _top_level(answer: Dict[str, Any]) -> int:
+    """The most probable level index of a `score` answer."""
+    probabilities = answer.get("probabilities")
+    if probabilities:
+        return int(max(probabilities, key=lambda level: float(probabilities[level])))
+    return int(round(float(answer["score"])))
 
 
 def _noul(answers: Dict[str, Any], key: str) -> float:
@@ -353,6 +543,12 @@ def _to_error(e: Exception) -> EvaluationError:
             error_code=str(e.response.status_code),
             message=str(detail),
             details={"exception_type": type(e).__name__},
+        )
+    if isinstance(e, ResponseError):
+        return EvaluationError(
+            error_code="INVALID_RESPONSE",
+            message=str(e),
+            details={"exception_type": type(e.__cause__ or e).__name__},
         )
     if isinstance(e, ModelMismatchError):
         return EvaluationError(

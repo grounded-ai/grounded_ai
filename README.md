@@ -182,7 +182,9 @@ print(result.score)       # 0.935: probability of hallucination, read off the mo
 print(result.confidence)  # 0.871: |2p - 1|, 0 at a coin flip, 1 at certainty
 ```
 
-The server address defaults to `http://127.0.0.1:8000` (override with `base_url=` or `DECIDER_BASE_URL`). As with every backend, `system_prompt` and `output_schema` replace the default question, and generation arguments like `temperature` are accepted; a decision model does not sample, so they have no effect.
+The server address defaults to `http://127.0.0.1:8000` (override with `base_url=` or `DECIDER_BASE_URL`). Generation arguments like `temperature` are accepted as on every backend; a decision model does not sample, so they have no effect. Any other unknown argument gets a warning.
+
+`eval_mode` is case-insensitive and can also be passed to a single `evaluate()` call. `/v1/systemone` has no system message, so `system_prompt` is not sent (passing one warns); the question comes from `eval_mode` or the field descriptions.
 
 **Custom eval modes.** Pass any question with two labels (positive first) instead of a built-in mode. `score` is the probability of the first label.
 
@@ -214,7 +216,32 @@ rules.evaluate(
 
 Without a custom template, the backend sends `context`, `query` and `response` as labelled fields, context first.
 
-Custom schemas work when every required field is a `bool`, a `Literal`/`Enum`, or a `float` bounded to `[0, 1]`; the field's `description` is the question, and all fields are asked in one request. `str` fields are not supported.
+**Custom schemas.** An output schema maps one-to-one onto what the model returns. `/v1/systemone` answers three question types, and each field is exactly one of them. The field's `description` is the question (the field name is used when there is none), and all fields are asked in one request.
+
+| Question type | Field type | Value |
+| :--- | :--- | :--- |
+| `noul` | `float` bounded to `[0, 1]` | the probability the statement is true |
+| `noul` | `bool` | that probability >= `threshold` |
+| `choice` | `Literal` / `Enum` (two or more options) | the option the model picked |
+| `score` | `int` or `float` with `ge`/`le` bounds, 2 to 10 values | a rating over ordered levels (`int`: the most probable level, `float`: the expected value) |
+
+```python
+class Ticket(BaseModel):
+    urgent: bool = Field(description="Does this need a reply within the hour?")
+    p_churn: float = Field(ge=0, le=1, description="Is this customer about to leave?")
+    area: Literal["billing", "bug", "account"]
+    clarity: int = Field(ge=1, le=5, description="Rate how clearly the problem is described.")
+
+evaluator.evaluate(response="Charged twice, fix it now.", output_schema=Ticket)
+```
+
+Nothing else maps: a required field of any other type (`str`, lists, nested models) returns an `INVALID_REQUEST` error, and one with a default is left at its default (this is why `reasoning` is always `None`).
+
+The stock `EvaluationOutput` is one `choice` question set by `eval_mode`. A subclass keeps that and has its extra fields asked the same way; if it narrows `label` to a `Literal`/`Enum`, the options must be the eval mode's two labels.
+
+**Custom inputs.** The request's `state` is a string or a JSON object, so any Pydantic input model works: its fields are sent as an object (nested values included), or its own `formatted_prompt` / a `base_template` overridden per call or as a subclass default is rendered and sent as text.
+
+The server truncates input that overflows the model's window from the end, without an error. The backend warns when the input is clearly too long (a rough character-count check against the window `/health` reports).
 
 On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).
     
@@ -232,11 +259,11 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 
 ## Backend Capabilities
 
-| Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` |
-| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection |
+| Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace | Strands Decider |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ➖ no system message; `eval_mode` is the question |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` / labelled fields |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 One typed question per field |
 
 ## API Reference
 

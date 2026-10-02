@@ -63,7 +63,7 @@ class Evaluator:
         elif model.startswith("decider/"):
             from .backends.decider import DeciderBackend
 
-            return DeciderBackend(model_name=model.replace("decider/", ""), **kwargs)
+            return DeciderBackend(model_name=model[len("decider/"):], **kwargs)
 
         else:
             raise ValueError(

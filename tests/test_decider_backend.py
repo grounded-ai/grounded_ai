@@ -1,5 +1,6 @@
+import enum
 import json
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import httpx
 import pytest
@@ -59,7 +60,7 @@ class TestDeciderBackend:
         assert evaluator.backend.base_url == "http://127.0.0.1:8010"
 
     def test_request_shape(self):
-        """Inputs become an object state; the eval mode becomes one noul question."""
+        """Inputs become an object state; the eval mode becomes one two-option choice question."""
         seen = []
         backend = make_backend(verdict(0.9), seen=seen, api_key="k")
         backend.evaluate(EvaluationInput(response="London is in France.", context="London is in England."))
@@ -91,12 +92,14 @@ class TestDeciderBackend:
         assert result.score == pytest.approx(score)
         assert result.confidence == pytest.approx(abs(2 * p - 1))
 
-    def test_system_prompt_is_the_question(self):
+    def test_system_prompt_is_not_sent(self):
+        """/v1/systemone has no system message: the eval mode stays the question."""
         seen = []
-        backend = make_backend({"verdict": {"type": "noul", "noul": 0.6}}, seen=seen, system_prompt="Is this safe?")
+        with pytest.warns(UserWarning, match="system_prompt is not sent"):
+            backend = make_backend(verdict(0.6), seen=seen, system_prompt="You are a strict auditor.")
         result = backend.evaluate(EvaluationInput(response="x"))
-        assert seen[0]["body"]["questions"]["verdict"]["instructions"] == "Is this safe?"
-        assert result.label == "yes"
+        assert "strict auditor" not in json.dumps(seen[0]["body"])
+        assert result.label == "hallucination"
 
     def test_threshold_runtime_override(self):
         backend = make_backend(verdict(0.6))
@@ -268,3 +271,259 @@ class TestDeciderBackend:
         evaluator.backend = backend
         result = await evaluator.evaluate(response="London is in France.", context="London is in England.")
         assert result.label == "hallucination"
+
+
+def auto_backend(seen=None, p=0.9, pick=0, **kwargs):
+    """Backend whose server answers whatever is asked, by question type: noul -> p, choice and
+    score -> option number `pick` with probability p."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={**HEALTH, "max_length": 100})
+        body = json.loads(request.content)
+        if seen is not None:
+            seen.append(body)
+        answers = {}
+        for key, q in body["questions"].items():
+            if q["type"] == "noul":
+                answers[key] = {"type": "noul", "noul": p}
+                continue
+            names = list(q["criteria"]) if q["type"] == "choice" else [str(i) for i in range(len(q["criteria"]))]
+            rest = round((1 - p) / (len(names) - 1), 4)
+            probabilities = {n: (p if i == pick else rest) for i, n in enumerate(names)}
+            if q["type"] == "choice":
+                answers[key] = {"type": "choice", "choice": names[pick], "probabilities": probabilities, "confidence": 0.8}
+            else:
+                answers[key] = {"type": "score", "score": float(pick), "legend": {}, "probabilities": probabilities, "confidence": 0.8}
+        return httpx.Response(200, json={"answers": answers})
+
+    return DeciderBackend(
+        model_name="strands-decider-2B-hobson-v19",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        **kwargs,
+    )
+
+
+INPUT = EvaluationInput(response="Our product is kinda cheap.", context="c", query="q")
+
+
+class TestSchemaParity:
+    """Any Pydantic schema that works on the OpenAI/Anthropic backends should work here whenever
+    a decision model can answer it."""
+
+    def test_field_without_description_uses_its_name(self):
+        class BrandCheck(BaseModel):
+            tone_compliant: bool
+
+        seen = []
+        result = auto_backend(seen).evaluate(INPUT, output_schema=BrandCheck)
+        assert result == BrandCheck(tone_compliant=True)
+        assert seen[0]["questions"]["tone_compliant"] == {"type": "noul", "instructions": "tone compliant"}
+
+    def test_free_text_field_with_default_is_left_alone(self):
+        class BrandCheck(BaseModel):
+            tone_compliant: bool
+            forbidden_words: List[str] = []
+            notes: Optional[str] = None
+
+        seen = []
+        result = auto_backend(seen).evaluate(INPUT, output_schema=BrandCheck)
+        assert result == BrandCheck(tone_compliant=True)
+        assert set(seen[0]["questions"]) == {"tone_compliant"}
+
+    def test_required_free_text_field_refused(self):
+        class BrandCheck(BaseModel):
+            tone_compliant: bool
+            forbidden_words: List[str]
+
+        result = auto_backend().evaluate(INPUT, output_schema=BrandCheck)
+        assert isinstance(result, EvaluationError)
+        assert result.error_code == "INVALID_REQUEST"
+        assert "forbidden_words" in result.message
+
+    def test_int_rating_is_a_score_question(self):
+        class Rating(BaseModel):
+            quality: int = Field(ge=1, le=5, description="Rate the quality.")
+            depth: float = Field(ge=1, le=3, description="Rate the depth.")
+            strict: int = Field(gt=0, lt=4)
+
+        seen = []
+        result = auto_backend(seen, pick=2).evaluate(INPUT, output_schema=Rating)
+        assert seen[0]["questions"]["quality"] == {
+            "type": "score", "instructions": "Rate the quality.", "criteria": ["1", "2", "3", "4", "5"]}
+        assert seen[0]["questions"]["strict"]["criteria"] == ["1", "2", "3"]
+        assert result == Rating(quality=3, depth=3.0, strict=3)
+
+    def test_unbounded_number_refused(self):
+        class Bad(BaseModel):
+            count: int
+
+        result = auto_backend().evaluate(INPUT, output_schema=Bad)
+        assert result.error_code == "INVALID_REQUEST"
+
+    def test_non_string_literal_and_enum_values_round_trip(self):
+        class Level(enum.IntEnum):
+            LOW = 1
+            HIGH = 2
+
+        class Color(str, enum.Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class Out(BaseModel):
+            stars: Literal[1, 2, 3]
+            level: Level
+            color: Color
+
+        seen = []
+        result = auto_backend(seen, pick=1).evaluate(INPUT, output_schema=Out)
+        assert seen[0]["questions"]["stars"]["criteria"] == {"1": "", "2": "", "3": ""}
+        assert result == Out(stars=2, level=Level.HIGH, color=Color.BLUE)
+
+    def test_pep604_optional_is_asked(self):
+        class Out(BaseModel):
+            urgent: bool | None = None
+            area: Literal["billing", "bug"] | None = None
+
+        seen = []
+        result = auto_backend(seen).evaluate(INPUT, output_schema=Out)
+        assert set(seen[0]["questions"]) == {"urgent", "area"}
+        assert result == Out(urgent=True, area="billing")
+
+    def test_single_option_literal_refused(self):
+        class Out(BaseModel):
+            kind: Literal["ticket"]
+
+        result = auto_backend().evaluate(INPUT, output_schema=Out)  # the server refuses one-option choices
+        assert result.error_code == "INVALID_REQUEST"
+
+    def test_nested_and_list_fields_do_not_map(self):
+        class Inner(BaseModel):
+            ok: bool
+
+        class Nested(BaseModel):
+            inner: Inner
+
+        class Multi(BaseModel):
+            tags: List[Literal["a", "b"]]
+
+        for schema in (Nested, Multi):
+            assert auto_backend().evaluate(INPUT, output_schema=schema).error_code == "INVALID_REQUEST"
+
+    def test_evaluation_output_subclass_extra_fields_are_asked(self):
+        class Detailed(EvaluationOutput):
+            severity: Literal["low", "high"] = Field(description="How severe?")
+
+        seen = []
+        result = auto_backend(seen).evaluate(INPUT, output_schema=Detailed)
+        assert set(seen[0]["questions"]) == {"verdict", "severity"}  # one request
+        assert (result.label, result.severity) == ("hallucination", "low")
+        assert result.score == pytest.approx(0.9)
+
+    def test_evaluation_output_subclass_label_literal(self):
+        """A narrowed label must be the eval mode's two labels; anything else is a custom eval_mode."""
+        class Tox(EvaluationOutput):
+            label: Literal["toxic", "non-toxic"]
+
+        result = auto_backend(p=0.8, eval_mode="TOXICITY").evaluate(INPUT, output_schema=Tox)
+        assert (result.label, result.score) == ("toxic", pytest.approx(0.8))
+        mismatch = auto_backend().evaluate(INPUT, output_schema=Tox)  # default mode is HALLUCINATION
+        assert mismatch.error_code == "INVALID_REQUEST"
+        assert "custom eval_mode" in mismatch.message
+
+
+class TestInputsAndModes:
+    def test_eval_mode_is_case_insensitive_and_per_call(self):
+        assert auto_backend(eval_mode="toxicity").eval_mode == "TOXICITY"
+        seen = []
+        backend = auto_backend(seen)
+        assert backend.evaluate(INPUT, eval_mode="rag_relevance").label == "relevant"
+        assert backend.eval_mode == "HALLUCINATION"  # the call did not change the backend
+        assert backend.evaluate(INPUT).label == "hallucination"
+
+    def test_eval_mode_with_plain_schema_refused(self):
+        class Out(BaseModel):
+            safe: bool
+
+        result = auto_backend().evaluate(INPUT, output_schema=Out, eval_mode="TOXICITY")
+        assert result.error_code == "INVALID_REQUEST"
+
+    def test_subclass_default_template_is_the_state(self):
+        class PortPolicy(EvaluationInput):
+            base_template: str = "Rule: ports must be 443. Text: {{ response }}"
+
+        seen = []
+        auto_backend(seen).evaluate(PortPolicy(response="Port 8080."))
+        assert seen[0]["state"] == "Rule: ports must be 443. Text: Port 8080."
+
+    def test_input_model_with_its_own_formatted_prompt(self):
+        class CodeReview(BaseModel):
+            code: str
+
+            @property
+            def formatted_prompt(self) -> str:
+                return f"Review this code:\n{self.code}"
+
+        seen = []
+        auto_backend(seen).evaluate(CodeReview(code="x = 1"))
+        assert seen[0]["state"] == "Review this code:\nx = 1"
+
+    def test_input_model_without_template_is_an_object_state(self):
+        class Pair(BaseModel):
+            question: str
+            answer: str
+
+        seen = []
+        auto_backend(seen).evaluate(Pair(question="q", answer="a"))
+        assert seen[0]["state"] == {"question": "q", "answer": "a"}
+
+    def test_empty_input_refused(self):
+        seen = []
+        result = auto_backend(seen).evaluate(EvaluationInput())
+        assert result.error_code == "INVALID_REQUEST"
+        assert seen == []
+
+
+class TestGuards:
+    def test_unknown_kwarg_warns(self):
+        with pytest.warns(UserWarning, match="treshold"):
+            auto_backend().evaluate(INPUT, treshold=0.9)
+
+    def test_bad_threshold_refused(self):
+        assert auto_backend().evaluate(INPUT, threshold=1.5).error_code == "INVALID_REQUEST"
+        with pytest.raises(ValueError):
+            auto_backend(threshold=-1)
+
+    def test_long_input_warns(self):
+        long_input = EvaluationInput(response="r", context="word " * 200)  # /health says max_length=100
+        with pytest.warns(UserWarning, match="truncates"):
+            auto_backend().evaluate(long_input)
+
+    def test_unreadable_answer_is_invalid_response(self):
+        backend = make_backend({"verdict": {"type": "choice", "probabilities": {"something": 1.0}}})
+        result = backend.evaluate(INPUT)
+        assert result.error_code == "INVALID_RESPONSE"
+
+    def test_model_name_keeps_inner_decider_segment(self):
+        evaluator = Evaluator("decider/my-org/decider/ckpt")
+        assert evaluator.backend.model_name == "my-org/decider/ckpt"
+
+    @pytest.mark.asyncio
+    async def test_async_custom_schema(self):
+        class Out(BaseModel):
+            quality: int = Field(ge=1, le=5)
+            safe: bool
+
+        def handler(request):
+            if request.url.path == "/health":
+                return httpx.Response(200, json=HEALTH)
+            return httpx.Response(200, json={"answers": {
+                "quality": {"type": "score", "score": 3.2, "probabilities": {"0": 0.0, "1": 0.1, "2": 0.2, "3": 0.6, "4": 0.1}},
+                "safe": {"type": "noul", "noul": 0.2},
+            }})
+
+        backend = DeciderBackend(
+            model_name="strands-decider-2B-hobson-v19",
+            async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+        assert await backend.evaluate_async(INPUT, output_schema=Out) == Out(quality=4, safe=False)
