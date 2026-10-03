@@ -63,7 +63,7 @@ class Evaluator:
         elif model.startswith("decider/"):
             from .backends.decider import DeciderBackend
 
-            return DeciderBackend(model_name=model.replace("decider/", ""), **kwargs)
+            return DeciderBackend(model_name=model[len("decider/"):], **kwargs)
 
         else:
             raise ValueError(
@@ -78,15 +78,23 @@ class Evaluator:
         Splits kwargs into input-construction fields and backend runtime args.
         Returns (input_data, backend_kwargs).
         """
-        input_kwargs = {k: v for k, v in kwargs.items() if k in _INPUT_FIELDS}
-        backend_kwargs = {k: v for k, v in kwargs.items() if k not in _INPUT_FIELDS}
+        # A backend with its own input class (the Decider backend's DeciderInput) names the field
+        # a bare string goes into; every other backend takes the stock EvaluationInput.
+        primary = getattr(self.backend, "primary_input_field", None)
+        if primary:
+            schema, fields = self.backend.input_schema, set(self.backend.input_schema.model_fields)
+        else:
+            schema, fields, primary = EvaluationInput, _INPUT_FIELDS, "response"
+        input_kwargs = {k: v for k, v in kwargs.items() if k in fields}
+        backend_kwargs = {k: v for k, v in kwargs.items() if k not in fields}
 
         if isinstance(input_data, GenAIConversation):
-            input_data = EvaluationInput(response=input_data.to_evaluation_string())
+            other = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS and k != primary}
+            input_data = schema(**{primary: input_data.to_evaluation_string()}, **other)
         elif isinstance(input_data, str):
-            input_data = EvaluationInput(response=input_data, **input_kwargs)
+            input_data = schema(**{primary: input_data}, **input_kwargs)
         elif input_data is None:
-            input_data = EvaluationInput(**input_kwargs)
+            input_data = schema(**input_kwargs)
 
         return input_data, backend_kwargs
 
