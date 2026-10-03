@@ -154,15 +154,11 @@ class DeciderBackend(BaseEvaluator):
         self._max_length = None  # the served model's token window, from /health
 
     def set_eval_mode(self, mode) -> None:
-        """A built-in mode name (or an EvalMode member, as on the SLM backend), or a custom mode:
+        """A built-in mode name, or an EvalMode member as on the SLM backend: HALLUCINATION,
+        TOXICITY or RAG_RELEVANCE. `eval_mode=` can also be passed to a single evaluate() call.
 
-            {"instructions": "Is the response written in our brand voice?",
-             "labels": {"on-brand": "friendly, plain words, no jargon",
-                        "off-brand": "formal, salesy or full of jargon"}}
-
-        A custom mode needs exactly two labels, positive first: `score` is p(first label) and
-        `label` is the first one when score >= threshold. For more than two outcomes, use an
-        output_schema with a Literal field. `eval_mode=` can also be passed to a single evaluate() call.
+        For an evaluation of your own, pass an output_schema: an EvaluationOutput subclass whose
+        `label` is a Literal or Enum of your options, the same way as on the other backends.
         """
         self._mode, self.eval_mode = _resolve_mode(mode)
 
@@ -250,20 +246,25 @@ class DeciderBackend(BaseEvaluator):
     def _verdict(self, output_schema: Type[BaseModel], mode: tuple) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """The one choice question behind score/label/confidence of an EvaluationOutput.
 
-        Returns (question, labels); `labels` maps the mode's two labels, positive first, to the
-        values the schema's `label` field takes.
+        Returns (question, labels); `labels` maps each option, positive first, to the value the
+        schema's `label` field takes. The options are the eval mode's two labels, unless the
+        schema narrows `label` to a Literal or Enum of its own: then those are the options and
+        the field's description is the question.
         """
         instructions, yes, no, criteria = mode
-        kind, options = _field_spec("label", output_schema.model_fields["label"], strict=False)
-        labels = {yes: yes, no: no}
-        if kind == "choice":
-            if set(options) != {yes, no}:
-                raise ValueError(
-                    f"{output_schema.__name__}.label allows {sorted(options)}, but the eval mode answers "
-                    f"'{yes}' or '{no}'. Pass a custom eval_mode with those labels."
-                )
-            labels = {yes: options[yes], no: options[no]}
-        return {"type": "choice", "instructions": instructions, "criteria": criteria}, labels
+        label_field = output_schema.model_fields["label"]
+        kind, options = _field_spec("label", label_field, strict=False)
+        if kind != "choice":
+            return {"type": "choice", "instructions": instructions, "criteria": criteria}, {yes: yes, no: no}
+        if set(options) == {yes, no}:
+            # Same labels as the mode: keep the mode's question and label descriptions.
+            return (
+                {"type": "choice", "instructions": instructions, "criteria": criteria},
+                {yes: options[yes], no: options[no]},
+            )
+        stock = EvaluationOutput.model_fields["label"].description
+        question = label_field.description if label_field.description not in (None, stock) else "Classify the response."
+        return {"type": "choice", "instructions": question, "criteria": {o: "" for o in options}}, options
 
     def _field_questions(self, schema: Type[BaseModel], skip: set, out: Dict[str, Dict[str, Any]]) -> None:
         """One question per answerable field of `schema`, of the type the field maps to."""
@@ -343,17 +344,25 @@ class DeciderBackend(BaseEvaluator):
         if not issubclass(output_schema, EvaluationOutput):
             return output_schema(**self._field_values(output_schema, set(), answers, threshold))
 
-        labels = plan["labels"]
-        yes, no = list(labels)
-        p = _prob(answers[_VERDICT_KEY]["probabilities"], yes, no)
-        extra = self._field_values(output_schema, _VERDICT_FIELDS, answers, threshold)
-        return output_schema(
-            score=p,
-            label=labels[yes] if p >= threshold else labels[no],
+        labels, verdict = plan["labels"], answers[_VERDICT_KEY]
+        if len(labels) == 2:
+            yes, no = list(labels)
+            p = _prob(verdict["probabilities"], yes, no)
+            label = labels[yes] if p >= threshold else labels[no]
             # Decider's derive_confidence, (N * p_max - 1) / (N - 1), at N = 2: 0 at p=0.5, 1 at certainty.
-            confidence=abs(2 * p - 1),
-            **extra,
-        )
+            confidence = abs(2 * p - 1)
+        else:
+            # More than two labels: the model's pick, with score = p(first label).
+            probabilities = {o: float(verdict["probabilities"][o]) for o in labels}
+            total = sum(probabilities.values())
+            if total <= 0 or min(probabilities.values()) < 0:
+                raise ValueError(f"Server returned invalid probabilities {verdict['probabilities']}.")
+            p = probabilities[next(iter(labels))] / total
+            label = labels[verdict["choice"]]
+            n = len(labels)
+            confidence = max(0.0, (n * max(probabilities.values()) / total - 1) / (n - 1))
+        extra = self._field_values(output_schema, _VERDICT_FIELDS, answers, threshold)
+        return output_schema(score=p, label=label, confidence=confidence, **extra)
 
     def _read(self, response: Any, output_schema: Type[BaseModel], plan: Dict[str, Any]) -> BaseModel:
         response.raise_for_status()
@@ -398,15 +407,13 @@ class DeciderBackend(BaseEvaluator):
 
 
 def _resolve_mode(mode: Any) -> Tuple[tuple, Any]:
-    """(the (instructions, positive, negative, criteria) tuple, the name or dict it came from)."""
-    if isinstance(mode, dict):
-        return _custom_mode(mode), mode
+    """(the (instructions, positive, negative, criteria) tuple, the mode's name)."""
     mode = getattr(mode, "value", mode)
     name = mode.upper() if isinstance(mode, str) else mode  # case-insensitive, as on the SLM backend
-    if name not in EVAL_MODES:
+    if not isinstance(name, str) or name not in EVAL_MODES:
         raise ValueError(
-            f"Invalid eval_mode '{mode}'. Options: {list(EVAL_MODES)}, or a custom "
-            '{"instructions": ..., "labels": {positive: description, negative: description}}'
+            f"Invalid eval_mode {mode!r}. Options: {list(EVAL_MODES)}. For an evaluation of your own, pass an "
+            "output_schema: an EvaluationOutput subclass whose `label` is a Literal or Enum of your options."
         )
     return EVAL_MODES[name], name
 
@@ -415,25 +422,6 @@ def _check_threshold(threshold: Any) -> float:
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0 <= threshold <= 1:
         raise ValueError(f"threshold must be a number in [0, 1], got {threshold!r}.")
     return float(threshold)
-
-
-def _custom_mode(mode: Dict[str, Any]) -> Tuple[str, str, str, Dict[str, str]]:
-    """Validate a custom eval mode into the (instructions, positive, negative, criteria) shape."""
-    instructions, labels = mode.get("instructions"), mode.get("labels")
-    unknown = set(mode) - {"instructions", "labels"}
-    if unknown:
-        raise ValueError(f"Custom eval_mode has unknown keys {sorted(unknown)}; expected 'instructions' and 'labels'.")
-    if not isinstance(instructions, str) or not instructions.strip():
-        raise ValueError("Custom eval_mode needs 'instructions': the question the model answers.")
-    if not isinstance(labels, dict) or len(labels) != 2:
-        raise ValueError(
-            "Custom eval_mode needs 'labels' with exactly two entries, positive first, e.g. "
-            '{"on-brand": "...", "off-brand": "..."}. For more outcomes, use an output_schema with a Literal field.'
-        )
-    if not all(isinstance(k, str) and k and isinstance(v, str) for k, v in labels.items()):
-        raise ValueError("Custom eval_mode labels must map label names to description strings.")
-    yes, no = list(labels)
-    return instructions, yes, no, dict(labels)
 
 
 class ModelMismatchError(Exception):

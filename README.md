@@ -186,32 +186,34 @@ The server address defaults to `http://127.0.0.1:8000` (override with `base_url=
 
 `eval_mode` is case-insensitive and can also be passed to a single `evaluate()` call. `/v1/systemone` has no system message, so `system_prompt` is not sent (passing one warns); the question comes from `eval_mode` or the field descriptions.
 
-**Custom eval modes.** Pass any question with two labels (positive first) instead of a built-in mode. `score` is the probability of the first label.
+**Custom evaluations.** As on the OpenAI and Anthropic backends, an evaluation of your own is an output schema: subclass `EvaluationOutput` and make `label` a `Literal` (or `Enum`) of your options. The field's `description` is the question, `score` is the probability of the first option, and with two options `label` is the first one when `score >= threshold`.
 
 ```python
-brand = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode={
-    "instructions": "Is the response written in our brand voice?",
-    "labels": {
-        "on-brand": "friendly, plain words, no jargon",
-        "off-brand": "formal, salesy or full of jargon",
-    },
-})
-brand.evaluate(response="No worries, we've refunded you. It should show up in a few days.").label
-# 'on-brand' (score 0.924)
+class BrandVoice(EvaluationOutput):
+    label: Literal["on-brand", "off-brand"] = Field(
+        description="Is the response written in our brand voice? "
+                    "on-brand: friendly, plain words, no jargon. off-brand: formal, salesy or full of jargon."
+    )
+
+evaluator.evaluate(
+    response="No worries, we've refunded you. It should show up in a few days.",
+    output_schema=BrandVoice,
+).label
+# 'on-brand'
 ```
 
 **Custom templates.** As on every backend, a custom `base_template` is rendered and becomes what the model reads, so you can put rules or extra context in front of the text:
 
 ```python
-rules = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode={
-    "instructions": "Does the text follow the rule?",
-    "labels": {"violates": "the text breaks the rule", "follows": "the text obeys the rule"},
-})
-rules.evaluate(
+class RuleCheck(EvaluationOutput):
+    label: Literal["violates", "follows"] = Field(description="Does the text follow the rule?")
+
+evaluator.evaluate(
     response="The API endpoint defaults to port 8080.",
     base_template="Rule: services must only listen on port 443.\nText: {{ response }}",
+    output_schema=RuleCheck,
 ).label
-# 'violates' (score 0.940)
+# 'violates'
 ```
 
 Without a custom template, the backend sends `context`, `query` and `response` as labelled fields, context first.
@@ -237,7 +239,7 @@ evaluator.evaluate(response="Charged twice, fix it now.", output_schema=Ticket)
 
 Nothing else maps: a required field of any other type (`str`, lists, nested models) returns an `INVALID_REQUEST` error, and one with a default is left at its default (this is why `reasoning` is always `None`).
 
-The stock `EvaluationOutput` is one `choice` question set by `eval_mode`. A subclass keeps that and has its extra fields asked the same way; if it narrows `label` to a `Literal`/`Enum`, the options must be the eval mode's two labels.
+The stock `EvaluationOutput` is one `choice` question set by `eval_mode`. Extra fields on a subclass are asked by the table above, in the same request.
 
 **Custom inputs.** The request's `state` is a string or a JSON object, so any Pydantic input model works: its fields are sent as an object (nested values included), or its own `formatted_prompt` / a `base_template` overridden per call or as a subclass default is rendered and sent as text.
 

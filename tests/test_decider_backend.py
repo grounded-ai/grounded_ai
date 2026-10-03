@@ -205,41 +205,6 @@ class TestDeciderBackend:
         result = await backend.evaluate_async(EvaluationInput(response="x"))
         assert result.error_code == "MODEL_MISMATCH"
 
-    BRAND = {
-        "instructions": "Is the response written in our brand voice?",
-        "labels": {"on-brand": "friendly, plain words, no jargon", "off-brand": "formal, salesy or full of jargon"},
-    }
-
-    def test_custom_eval_mode(self):
-        seen = []
-        backend = make_backend(verdict(0.8, "on-brand", "off-brand"), seen=seen, eval_mode=self.BRAND)
-        result = backend.evaluate(EvaluationInput(response="Hey! Here's how to fix it."))
-        question = seen[0]["body"]["questions"]["verdict"]
-        assert question == {"type": "choice", "instructions": self.BRAND["instructions"], "criteria": self.BRAND["labels"]}
-        assert (result.label, result.score) == ("on-brand", 0.8)
-        assert backend.evaluate(EvaluationInput(response="x"), threshold=0.9).label == "off-brand"
-
-    def test_custom_eval_mode_via_evaluator_and_set_eval_mode(self):
-        evaluator = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode=self.BRAND)
-        assert evaluator.backend.eval_mode == self.BRAND
-        backend = make_backend(verdict(0.2, "on-brand", "off-brand"))
-        backend.set_eval_mode(self.BRAND)
-        assert backend.evaluate(EvaluationInput(response="x")).label == "off-brand"
-
-    @pytest.mark.parametrize(
-        "mode",
-        [
-            {"labels": {"a": "", "b": ""}},  # no instructions
-            {"instructions": "Q?", "labels": {"a": "", "b": "", "c": ""}},  # three labels
-            {"instructions": "Q?", "labels": {"a": ""}},  # one label
-            {"instructions": "Q?", "labels": {"a": None, "b": ""}},  # non-str description
-            {"instructions": "Q?", "labels": {"a": "", "b": ""}, "criteria": {}},  # unknown key
-        ],
-    )
-    def test_invalid_custom_eval_mode(self, mode):
-        with pytest.raises(ValueError):
-            make_backend({}, eval_mode=mode)
-
     def test_custom_base_template_is_the_state(self):
         """Like every other backend, a custom base_template's rendered text is what the model reads."""
         seen = []
@@ -420,16 +385,58 @@ class TestSchemaParity:
         assert (result.label, result.severity) == ("hallucination", "low")
         assert result.score == pytest.approx(0.9)
 
-    def test_evaluation_output_subclass_label_literal(self):
-        """A narrowed label must be the eval mode's two labels; anything else is a custom eval_mode."""
+
+class TestCustomEvaluation:
+    """A custom evaluation is an EvaluationOutput subclass with its own label options, as on the
+    OpenAI/Anthropic backends. There is no custom mode object."""
+
+    def test_label_options_are_the_choice(self):
+        class BrandVoice(EvaluationOutput):
+            label: Literal["on-brand", "off-brand"] = Field(description="Is the response written in our brand voice?")
+
+        seen = []
+        result = auto_backend(seen, p=0.8).evaluate(INPUT, output_schema=BrandVoice)
+        assert seen[0]["questions"]["verdict"] == {
+            "type": "choice",
+            "instructions": "Is the response written in our brand voice?",
+            "criteria": {"on-brand": "", "off-brand": ""},
+        }
+        assert (result.label, result.score) == ("on-brand", pytest.approx(0.8))  # score = p(first label)
+        assert result.confidence == pytest.approx(0.6)
+        assert auto_backend(p=0.8).evaluate(INPUT, output_schema=BrandVoice, threshold=0.9).label == "off-brand"
+
+    def test_more_than_two_labels(self):
+        class Triage(EvaluationOutput):
+            label: Literal["unsafe", "borderline", "safe"] = Field(description="How risky is the response?")
+
+        result = auto_backend(p=0.7, pick=2).evaluate(INPUT, output_schema=Triage)
+        assert result.label == "safe"  # the model's pick
+        assert result.score == pytest.approx(0.15)  # p(first label)
+        assert result.confidence == pytest.approx((3 * 0.7 - 1) / 2)
+
+    def test_enum_labels(self):
+        class Verdict(str, enum.Enum):
+            PASS = "pass"
+            FAIL = "fail"
+
+        class Gate(EvaluationOutput):
+            label: Verdict = Field(description="Does the response pass review?")
+
+        assert auto_backend(p=0.9).evaluate(INPUT, output_schema=Gate).label is Verdict.PASS
+
+    def test_labels_matching_the_built_in_mode_use_its_question(self):
         class Tox(EvaluationOutput):
             label: Literal["toxic", "non-toxic"]
 
-        result = auto_backend(p=0.8, eval_mode="TOXICITY").evaluate(INPUT, output_schema=Tox)
-        assert (result.label, result.score) == ("toxic", pytest.approx(0.8))
-        mismatch = auto_backend().evaluate(INPUT, output_schema=Tox)  # default mode is HALLUCINATION
-        assert mismatch.error_code == "INVALID_REQUEST"
-        assert "custom eval_mode" in mismatch.message
+        seen = []
+        auto_backend(seen, eval_mode="TOXICITY").evaluate(INPUT, output_schema=Tox)
+        question = seen[0]["questions"]["verdict"]
+        assert question["instructions"] == "Classify the tone of the response."
+        assert question["criteria"]["toxic"].startswith("the response is abusive")
+
+    def test_dict_eval_mode_is_gone(self):
+        with pytest.raises(ValueError, match="output_schema"):
+            auto_backend(eval_mode={"instructions": "Q?", "labels": {"a": "", "b": ""}})
 
 
 class TestInputsAndModes:
