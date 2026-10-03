@@ -1,0 +1,65 @@
+name: Decider live test
+
+# Runs the Decider backend against a real strands-decider server and checkpoint (CPU).
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "grounded_ai/backends/decider.py"
+      - "grounded_ai/__init__.py"
+      - "tests/integration/**"
+      - "examples/backends/strands_decider.ipynb"
+      - ".github/workflows/decider-live.yml"
+
+concurrency:
+  group: decider-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DECIDER_LIVE: "1"
+      DECIDER_DEVICE: cpu
+      DECIDER_CHECKPOINT: StrandsAgents/strands-decider-2B-hobson-v19
+      HF_HOME: ${{ github.workspace }}/.hf
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+
+    - name: Cache the checkpoint
+      uses: actions/cache@v4
+      with:
+        path: .hf
+        key: hf-${{ env.DECIDER_CHECKPOINT }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # CPU-only torch: the default Linux wheel pulls several GB of CUDA libraries.
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install -e ".[decider]" pytest pytest-asyncio nbconvert ipykernel
+
+    - name: Run the live tests
+      run: pytest tests/integration -s -v
+
+    - name: Run the example notebook
+      run: |
+        jupyter nbconvert --to notebook --execute examples/backends/strands_decider.ipynb \
+          --output strands_decider.executed.ipynb --output-dir executed --ExecutePreprocessor.timeout=1800
+
+    - name: Upload the executed notebook
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: strands-decider-notebook
+        path: executed/
+        if-no-files-found: ignore
