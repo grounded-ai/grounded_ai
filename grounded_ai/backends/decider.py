@@ -121,6 +121,7 @@ RAG_RELEVANCE = ChoiceQuestion(
     },
 )
 
+
 class SystemOneRequest(BaseModel):
     """The body of `POST /v1/systemone`. Every request is validated against this before it is
     sent, so no input class, however it is customized, can put anything else on the wire."""
@@ -170,13 +171,13 @@ class DeciderInput(BaseModel):
         """What the model reads. Override to render your fields your own way; return text or JSON."""
         if self.state is not None:
             return self.state
-        own_fields = [name for name in type(self).model_fields if name not in DeciderInput.model_fields]
-        data = self.model_dump(mode="json", include=set(own_fields), exclude_none=True)
+        own_fields = set(type(self).model_fields) - set(DeciderInput.model_fields)
+        data = self.model_dump(mode="json", include=own_fields, exclude_none=True)  # in declared order
         if not data:
             raise ValueError(
                 "Nothing to evaluate: set `state`, or subclass DeciderInput and fill in your own fields."
             )
-        return {name: data[name] for name in own_fields if name in data}
+        return data
 
 
 class DeciderOutput(BaseModel):
@@ -246,6 +247,7 @@ class DeciderBackend(BaseEvaluator):
         self._model_checked = False
         self._max_length = None  # the served model's token window, from /health
         self._server = None  # the process warmup() started, if any
+        self._server_log = None  # where that process's output goes
 
     @property
     def async_client(self):
@@ -293,29 +295,37 @@ class DeciderBackend(BaseEvaluator):
         command = [executable, "serve", checkpoint or self.model_name, "--port", str(port)]
         if device:
             command += ["--device", device]
-        log = None if verbose else tempfile.NamedTemporaryFile(prefix="strands-decider-", suffix=".log", delete=False)
-        self._server = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT if log else None)
-        atexit.register(self.shutdown)
-
-        def failure(message: str) -> str:
-            if log is None:
-                return message
-            log.flush()
-            tail = "".join(open(log.name, errors="replace").readlines()[-15:]).strip()
-            return f"{message} Server log ({log.name}):\n{tail}" if tail else message
+        if self._server is None and self._server_log is None:
+            atexit.register(self.shutdown)  # once per backend
+        if verbose:
+            self._server = subprocess.Popen(command)
+        else:
+            with tempfile.NamedTemporaryFile(prefix="strands-decider-", suffix=".log", delete=False) as log:
+                self._server_log = log.name
+                self._server = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._server.poll() is not None:
-                code, self._server = self._server.returncode, None
-                raise RuntimeError(failure(f"`{' '.join(command)}` exited with code {code} before it was ready."))
+                raise RuntimeError(self._startup_failure(
+                    f"`{' '.join(command)}` exited with code {self._server.returncode} before it was ready."))
             if self._healthy():
                 return self
             time.sleep(1.0)
-        self.shutdown()
-        raise TimeoutError(failure(f"The strands-decider server was not ready on port {port} after {timeout:.0f}s."))
+        self.shutdown(keep_log=True)
+        raise TimeoutError(self._startup_failure(
+            f"The strands-decider server was not ready on port {port} after {timeout:.0f}s."))
 
-    def shutdown(self) -> None:
+    def _startup_failure(self, message: str) -> str:
+        """The message, with the end of the server's log when there is one. The log file is kept."""
+        self._server = None
+        if not self._server_log:
+            return message
+        with open(self._server_log, errors="replace") as log:
+            tail = "".join(log.readlines()[-15:]).strip()
+        return f"{message} Server log ({self._server_log}):\n{tail}" if tail else message
+
+    def shutdown(self, keep_log: bool = False) -> None:
         """Stop the server that warmup() started. Does nothing if warmup() did not start one."""
         server, self._server = self._server, None
         if server is not None and server.poll() is None:
@@ -324,6 +334,11 @@ class DeciderBackend(BaseEvaluator):
                 server.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 server.kill()
+        if server is not None and self._server_log and not keep_log:
+            try:
+                os.remove(self._server_log)
+            except OSError:
+                pass
 
     def _healthy(self) -> bool:
         try:
@@ -335,31 +350,26 @@ class DeciderBackend(BaseEvaluator):
 
     def _check_model(self, response: Any) -> None:
         """Compare model_name with what /health says the server is running. Runs once."""
-        if response.status_code == 404:
-            # A /v1/systemone server without /health: nothing to check against.
-            self._model_checked = True
-            return
-        response.raise_for_status()
-        try:
-            health = response.json()
-        except ValueError:
-            health = None
-        if not isinstance(health, dict):
-            # /health exists but is not the strands-decider JSON: nothing to check against.
-            self._model_checked = True
-            return
-        served, checkpoint = health.get("model"), health.get("checkpoint")
-        names = {n for n in (served, checkpoint) if n}
-        if checkpoint:
-            names.add(checkpoint.rstrip("/").split("/")[-1])
-        if names and self.model_name not in names:
-            raise ModelMismatchError(
-                f"Server at {self.base_url} is running '{checkpoint or served}', "
-                f"but the evaluator asked for '{self.model_name}'. "
-                f"Use Evaluator(\"decider/{served or checkpoint}\") or serve the checkpoint you want."
-            )
-        if isinstance(health.get("max_length"), int):
-            self._max_length = health["max_length"]
+        health = None
+        if response.status_code != 404:  # a /v1/systemone server without /health has nothing to check
+            response.raise_for_status()
+            try:
+                health = response.json()
+            except ValueError:
+                pass
+        if isinstance(health, dict):  # anything else is not the strands-decider /health
+            served, checkpoint = health.get("model"), health.get("checkpoint")
+            names = {n for n in (served, checkpoint) if n}
+            if checkpoint:
+                names.add(checkpoint.rstrip("/").split("/")[-1])
+            if names and self.model_name not in names:
+                raise ModelMismatchError(
+                    f"Server at {self.base_url} is running '{checkpoint or served}', "
+                    f"but the evaluator asked for '{self.model_name}'. "
+                    f"Use Evaluator(\"decider/{served or checkpoint}\") or serve the checkpoint you want."
+                )
+            if isinstance(health.get("max_length"), int):
+                self._max_length = health["max_length"]
         self._model_checked = True
 
     def _warn_if_long(self, state: Content) -> None:
@@ -398,24 +408,22 @@ class DeciderBackend(BaseEvaluator):
                 f"cannot be reshaped into {getattr(output_schema, '__name__', output_schema)}. "
                 "Customize the input (DeciderInput) instead."
             )
-        questions = {
-            name: q.model_dump(exclude_none=True) if isinstance(q, BaseModel) else q
-            for name, q in dict(input_data.questions).items()
-        }
+        # Dumped and validated again on purpose: a subclass may have loosened `questions`.
+        questions = input_data.model_dump(include={"questions"}, exclude_none=True)["questions"]
         try:
             request = SystemOneRequest(state=input_data.build_state(), questions=questions, model=self.model_name)
         except ValidationError as e:
             raise ValueError(f"The request does not match the /v1/systemone contract: {e}") from e
         return request.model_dump(exclude_none=True)
 
-    def _read(self, response: Any, output_schema: Type[BaseModel], questions: Dict[str, Any]) -> BaseModel:
+    def _read(self, response: Any, questions: Dict[str, Any]) -> DeciderOutput:
         response.raise_for_status()
         try:
-            output = output_schema(**response.json())
+            output = DeciderOutput(**response.json())
             _check_answers(output.answers, questions)
             return output
         except (KeyError, TypeError, ValueError) as e:
-            raise ResponseError(f"Could not read the server's answer into {output_schema.__name__}: {e!r}") from e
+            raise ResponseError(f"Could not read the server's answer into DeciderOutput: {e!r}") from e
 
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs
@@ -428,7 +436,7 @@ class DeciderBackend(BaseEvaluator):
             response = self.client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            return self._read(response, output_schema, body["questions"])
+            return self._read(response, body["questions"])
         except Exception as e:
             return _to_error(e)
 
@@ -445,7 +453,7 @@ class DeciderBackend(BaseEvaluator):
             response = await self.async_client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            return self._read(response, output_schema, body["questions"])
+            return self._read(response, body["questions"])
         except Exception as e:
             return _to_error(e)
 
@@ -479,42 +487,22 @@ class ResponseError(Exception):
 
 
 def _to_error(e: Exception) -> EvaluationError:
-    if httpx is not None and isinstance(e, httpx.HTTPStatusError):
+    """Every failure leaves the backend as an EvaluationError, like on the other backends."""
+    cause, message = e, str(e)
+    if isinstance(e, httpx.HTTPStatusError):
+        code = str(e.response.status_code)
         try:
-            detail = e.response.json().get("detail", e.response.text)
-        except ValueError:
-            detail = e.response.text
-        return EvaluationError(
-            error_code=str(e.response.status_code),
-            message=str(detail),
-            details={"exception_type": type(e).__name__},
-        )
-    if isinstance(e, ResponseError):
-        return EvaluationError(
-            error_code="INVALID_RESPONSE",
-            message=str(e),
-            details={"exception_type": type(e.__cause__ or e).__name__},
-        )
-    if isinstance(e, ModelMismatchError):
-        return EvaluationError(
-            error_code="MODEL_MISMATCH",
-            message=str(e),
-            details={"exception_type": type(e).__name__},
-        )
-    if httpx is not None and isinstance(e, httpx.TransportError):
-        return EvaluationError(
-            error_code="CONNECTION_ERROR",
-            message=f"Could not reach the /v1/systemone server: {e}",
-            details={"exception_type": type(e).__name__},
-        )
-    if isinstance(e, (ValueError, TypeError)):
-        return EvaluationError(
-            error_code="INVALID_REQUEST",
-            message=str(e),
-            details={"exception_type": type(e).__name__},
-        )
-    return EvaluationError(
-        error_code="UNKNOWN_ERROR",
-        message=str(e),
-        details={"exception_type": type(e).__name__},
-    )
+            message = str(e.response.json().get("detail", e.response.text))
+        except (ValueError, AttributeError):
+            message = e.response.text
+    elif isinstance(e, ResponseError):
+        code, cause = "INVALID_RESPONSE", e.__cause__ or e
+    elif isinstance(e, ModelMismatchError):
+        code = "MODEL_MISMATCH"
+    elif isinstance(e, httpx.TransportError):
+        code, message = "CONNECTION_ERROR", f"Could not reach the /v1/systemone server: {e}"
+    elif isinstance(e, (ValueError, TypeError)):
+        code = "INVALID_REQUEST"
+    else:
+        code = "UNKNOWN_ERROR"
+    return EvaluationError(error_code=code, message=message, details={"exception_type": type(cause).__name__})

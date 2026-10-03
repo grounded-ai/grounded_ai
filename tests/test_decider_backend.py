@@ -4,20 +4,15 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+import grounded_ai.backends.decider as decider
 from grounded_ai import AsyncEvaluator, Evaluator
 from grounded_ai.backends.decider import (
     HALLUCINATION,
     RAG_RELEVANCE,
     TOXICITY,
-    ChoiceAnswer,
-    ChoiceQuestion,
     DeciderBackend,
     DeciderInput,
     DeciderOutput,
-    NoulAnswer,
-    NoulQuestion,
-    ScoreAnswer,
-    ScoreQuestion,
 )
 from grounded_ai.schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
@@ -109,33 +104,6 @@ class TestContract:
             "questions": {"verdict": HALLUCINATION.model_dump()},
         }
 
-    def test_all_three_question_types_round_trip(self):
-        questions = {
-            "risky": NoulQuestion(instructions="Is this a security risk?"),
-            "severity": ChoiceQuestion(
-                instructions="How severe is it?", criteria={"low": "cosmetic", "medium": "", "high": "data loss"}
-            ),
-            "complexity": ScoreQuestion(instructions="Rate the complexity.", criteria=["trivial", "simple", "hard"]),
-        }
-        seen = []
-        result = make_backend(seen, p=0.7, pick=2).evaluate(DeciderInput(state="x", questions=questions))
-
-        sent = seen[0]["body"]["questions"]
-        assert sent["risky"] == {"type": "noul", "instructions": "Is this a security risk?"}
-        assert sent["severity"]["criteria"] == {"low": "cosmetic", "medium": "", "high": "data loss"}
-        assert sent["complexity"] == {
-            "type": "score", "instructions": "Rate the complexity.", "criteria": ["trivial", "simple", "hard"]}
-
-        assert isinstance(result, DeciderOutput)
-        assert result.answers["risky"] == NoulAnswer(noul=0.7)
-        assert result.answers["severity"] == ChoiceAnswer(
-            choice="high", probabilities={"low": 0.15, "medium": 0.15, "high": 0.7}, confidence=0.8)
-        assert result.answers["complexity"] == ScoreAnswer(
-            score=2.0, legend={"0": "trivial", "1": "simple", "2": "hard"},
-            probabilities={"0": 0.15, "1": 0.15, "2": 0.7}, confidence=0.7)
-        assert (result.model, result.usage, result.latency_ms) == (
-            MODEL, {"input_tokens": 42, "output_tokens": 3}, 12.5)
-
     @pytest.mark.parametrize(
         "question,labels",
         [
@@ -147,24 +115,6 @@ class TestContract:
     def test_shipped_questions(self, question, labels):
         result = make_backend().evaluate(DeciderInput(state="x", questions={"verdict": question}))
         assert set(result.answers["verdict"].probabilities) == labels
-
-    def test_questions_are_validated_like_the_server_does(self):
-        with pytest.raises(ValidationError):
-            DeciderInput(state="x", questions={})  # at least one question
-        with pytest.raises(ValidationError):
-            ChoiceQuestion(instructions="Q?", criteria={"only": ""})  # a choice needs two options
-        with pytest.raises(ValidationError):
-            ScoreQuestion(instructions="Q?", criteria=[str(i) for i in range(11)])  # at most 10 levels
-        with pytest.raises(ValidationError):
-            NoulQuestion(instructions="Q?", criteria={"maybe": ""})
-
-    def test_questions_from_plain_dicts(self):
-        seen = []
-        make_backend(seen).evaluate({
-            "state": "x",
-            "questions": {"safe": {"type": "noul", "instructions": "Is it safe?"}},
-        })
-        assert seen[0]["body"]["questions"]["safe"] == {"type": "noul", "instructions": "Is it safe?"}
 
     def test_output_contract_cannot_be_replaced(self):
         class Reshaped(DeciderOutput):
@@ -205,83 +155,9 @@ class TestContract:
         assert seen == []
 
 
-class TestInputCustomization:
-    """The state is the part people shape. The contract is checked on every request regardless."""
-
-    def test_subclass_fields_become_the_state_in_declared_order(self):
-        class SupportTurn(DeciderInput):
-            customer_message: str
-            agent_reply: str
-            tags: list = []
-            internal_note: str = None
-
-        seen = []
-        make_backend(seen).evaluate(SupportTurn(
-            customer_message="Why was I charged twice?", agent_reply="Refunded.", tags=["billing"],
-            questions={"apologizes": NoulQuestion(instructions="Does the agent apologize?")},
-        ))
-        assert list(seen[0]["body"]["state"].items()) == [
-            ("customer_message", "Why was I charged twice?"), ("agent_reply", "Refunded."), ("tags", ["billing"])]
-
-    def test_build_state_override(self):
-        class PortPolicy(DeciderInput):
-            text: str
-
-            def build_state(self):
-                return f"Rule: ports must be 443. Text: {self.text}"
-
-        seen = []
-        make_backend(seen).evaluate(PortPolicy(text="Port 8080.", questions={"verdict": HALLUCINATION}))
-        assert seen[0]["body"]["state"] == "Rule: ports must be 443. Text: Port 8080."
-
-    def test_explicit_state_is_sent_as_is(self):
-        seen = []
-        backend = make_backend(seen)
-        backend.evaluate(ask({"ticket": {"id": 7, "body": "Charged twice."}}))
-        backend.evaluate(ask("Charged twice."))
-        backend.evaluate(RagInput(context="c", response="r", state="wins", questions={"verdict": HALLUCINATION}))
-        assert [call["body"]["state"] for call in seen] == [
-            {"ticket": {"id": 7, "body": "Charged twice."}}, "Charged twice.", "wins"]
-
-    def test_empty_input_refused(self):
-        seen = []
-        backend = make_backend(seen)
-        assert backend.evaluate(ask(None)).error_code == "INVALID_REQUEST"
-        assert backend.evaluate(ask("  ")).error_code == "INVALID_REQUEST"
-        assert seen == []
-
-    def test_a_subclass_cannot_break_the_contract(self):
-        """Whatever a subclass does, only a valid /v1/systemone request is sent."""
-
-        class NotAState(DeciderInput):
-            def build_state(self):
-                return 42
-
-        class LooseQuestions(DeciderInput):
-            questions: dict
-
-        class ExtraKeys(DeciderInput):
-            questions: dict
-
-        seen = []
-        backend = make_backend(seen)
-        bad = [
-            NotAState(questions={"verdict": HALLUCINATION}),
-            LooseQuestions(state="x", questions={}),
-            LooseQuestions(state="x", questions={"q": {"type": "essay", "instructions": "Write."}}),
-            LooseQuestions(state="x", questions={"q": {"type": "choice", "instructions": "Q?", "criteria": {"only": ""}}}),
-            ExtraKeys(state="x", questions={"q": {"type": "noul", "instructions": "Q?", "temperature": 0.2}}),
-        ]
-        for input_data in bad:
-            result = backend.evaluate(input_data)
-            assert result.error_code == "INVALID_REQUEST", input_data
-            assert "contract" in result.message
-        assert seen == []
-
-        # ...and a loosely typed subclass still works when what it holds is valid
-        result = backend.evaluate(LooseQuestions(state="x", questions={"q": {"type": "noul", "instructions": "Q?"}}))
-        assert result.answers["q"].noul == 0.9
-        assert set(seen[0]["body"]) == {"state", "questions", "model"}
+class TestEvaluatorKeywords:
+    """Evaluator.evaluate() builds the DeciderInput from keywords. (How inputs map onto the request
+    and how answers parse is covered in test_decider_contract.py.)"""
 
     def test_evaluator_takes_decider_fields_as_keywords(self):
         seen = []
@@ -318,10 +194,6 @@ class TestServer:
         assert isinstance(result, EvaluationError)
         assert result.error_code == "422"
         assert "field required" in result.message
-
-    def test_unreadable_answer_is_invalid_response(self):
-        backend = make_backend(respond=lambda body: httpx.Response(200, json={"answers": {"verdict": {"type": "choice"}}}))
-        assert backend.evaluate(ask()).error_code == "INVALID_RESPONSE"
 
     def test_model_mismatch_refused(self):
         """The server ignores the request's model field, so a wrong name must fail loudly."""
@@ -402,8 +274,6 @@ class TestWarmup:
         return DeciderBackend(model_name=model_name, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     def test_starts_the_server_on_the_port_and_waits(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         up, started = set(), []
 
         def popen(command, **kwargs):
@@ -426,16 +296,12 @@ class TestWarmup:
         assert started[0].terminated
 
     def test_reuses_a_server_already_on_the_port(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         monkeypatch.setattr(decider.subprocess, "Popen", lambda command, **kw: pytest.fail("should not start a server"))
         backend = self._backend({8000})
         backend.warmup(port=8000)
         assert backend.base_url == "http://127.0.0.1:8000"
 
     def test_checkpoint_argument_overrides_the_model_name(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         up, started = set(), []
         monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
         monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(c), up.add(8000), FakeServer(c))[2])
@@ -444,8 +310,6 @@ class TestWarmup:
         assert started[0][:3] == ["strands-decider", "serve", "/models/hobson"]
 
     def test_server_that_exits_is_reported_with_its_log(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         def popen(command, stdout=None, **kwargs):
             stdout.write(b"OSError: checkpoint not found\n")  # what the server printed before dying
             return FakeServer(command, exits_with=1)
@@ -456,8 +320,6 @@ class TestWarmup:
             self._backend(set()).warmup(port=8000)
 
     def test_server_output_is_kept_out_of_the_way_unless_verbose(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         up, seen = set(), []
 
         def popen(command, **kwargs):
@@ -472,18 +334,14 @@ class TestWarmup:
         up.clear()
         self._backend(up).warmup(port=8000, verbose=True)
         assert seen[0]["stdout"] is not None and seen[0]["stderr"] is decider.subprocess.STDOUT
-        assert seen[1] == {"stdout": None, "stderr": None}
+        assert seen[1] == {}  # verbose: the server writes straight to the terminal
 
     def test_missing_server_package(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         monkeypatch.setattr(decider.shutil, "which", lambda name: None)
         with pytest.raises(ImportError, match="grounded-ai\\[decider\\]"):
             self._backend(set()).warmup(port=8000)
 
     def test_times_out(self, monkeypatch):
-        import grounded_ai.backends.decider as decider
-
         started = []
         monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
         monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(FakeServer(c)), started[-1])[1])
