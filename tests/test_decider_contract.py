@@ -475,9 +475,19 @@ def test_our_classes_have_the_same_fields_as_the_servers(ours, theirs):
     assert set(ours.model_fields) == set(getattr(server_schema, theirs).model_fields)
 
 
+# Two cases the server lets through and the input class does not: it infers a missing `type`
+# from the other keys, and it ignores keys it does not know. Being stricter here is deliberate:
+# a request the input class accepts is always one the server accepts, never the other way round.
+STRICTER_THAN_THE_SERVER = {"missing-type", "stray-key"}
+
+
 @needs_server
 @pytest.mark.parametrize("questions", BAD_QUESTIONS)
-def test_the_server_refuses_the_same_bad_questions(questions):
+def test_the_server_refuses_the_same_bad_questions(request, questions):
+    case = request.node.callspec.id
+    if case in STRICTER_THAN_THE_SERVER:
+        server_schema.SystemOneRequest(state="x", questions=questions)  # accepted by the server
+        return
     with pytest.raises(ValidationError):
         server_schema.SystemOneRequest(state="x", questions=questions)
 
