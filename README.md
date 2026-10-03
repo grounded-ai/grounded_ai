@@ -168,20 +168,20 @@ pip install grounded-ai[decider]   # adds httpx and the strands-decider server
 
 ```python
 from grounded_ai import Evaluator
-from grounded_ai.backends.decider import HALLUCINATION
+from grounded_ai.backends.decider import HALLUCINATION, DeciderInput
 
 # The model name is the checkpoint to serve. warmup() starts the server and waits until it is ready.
 evaluator = Evaluator("decider/StrandsAgents/strands-decider-2B-hobson-v19")
 evaluator.backend.warmup(port=8000)
 
-result = evaluator.evaluate(
+result = evaluator.evaluate(DeciderInput(
     state={
         "context": "Refunds are accepted within 30 days of purchase.",
         "query": "How long do I have to return an item?",
         "response": "You have 90 days to request a refund.",
     },
     questions={"verdict": HALLUCINATION},
-)
+))
 verdict = result.answers["verdict"]
 print(verdict.choice)         # 'hallucination'
 print(verdict.probabilities)  # {'hallucination': 0.935, 'faithful': 0.065}
@@ -190,7 +190,7 @@ print(verdict.confidence)     # 0.871
 
 **The server.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint you named.
 
-**The contract.** A request is a `state` (what the model reads) and named `questions` (what it is asked); the response is one answer per question. Both sides are fixed classes that mirror the model:
+**The contract.** Every call takes a `DeciderInput`: a `state` (what the model reads) and named `questions` (what it is asked). It returns a `DeciderOutput`: one answer per question. Both sides are fixed classes that mirror the model:
 
 | Question | You give | Answer | You get |
 | :--- | :--- | :--- | :--- |
@@ -201,8 +201,8 @@ print(verdict.confidence)     # 0.871
 ```python
 from grounded_ai.backends.decider import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
-result = evaluator.evaluate(
-    "You have charged me twice and my account is now overdrawn. Fix it today.",   # a bare string is the state
+result = evaluator.evaluate(DeciderInput(
+    state="You have charged me twice and my account is now overdrawn. Fix it today.",
     questions={
         "urgent": NoulQuestion(instructions="This needs a reply within the hour."),
         "area": ChoiceQuestion(
@@ -214,7 +214,7 @@ result = evaluator.evaluate(
             criteria=["unclear", "partly clear", "clear"],
         ),
     },
-)
+))
 result.answers["urgent"].noul          # 0.91
 result.answers["area"].choice          # 'billing'
 result.answers["clarity"].score        # 1.8
@@ -258,7 +258,7 @@ evaluator.evaluate(PortPolicy(
 ))
 ```
 
-To use your class with keyword arguments, pass it once: `Evaluator("decider/...", input_schema=SupportTurn)`, then `evaluator.evaluate(customer_message=..., agent_reply=..., questions=...)`.
+Shorthand: `evaluator.evaluate(state=..., questions=...)` builds the `DeciderInput` for you. For your own class, pass it once as `Evaluator("decider/...", input_schema=SupportTurn)` and its fields work as keywords too.
 
 **The contract cannot be broken.** Whatever an input class does, the request is validated against the `/v1/systemone` contract before it is sent: a state that is not text or JSON, an unknown question type, a stray key on a question, or no questions at all returns `INVALID_REQUEST` and nothing goes to the server.
 
