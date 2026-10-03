@@ -70,25 +70,27 @@ class ScoreQuestion(BaseModel):
 
 Question = Annotated[Union[NoulQuestion, ChoiceQuestion, ScoreQuestion], Field(discriminator="type")]
 
+Probability = Annotated[float, Field(ge=0.0, le=1.0)]
+
 
 class NoulAnswer(BaseModel):
     type: Literal["noul"] = "noul"
-    noul: float = Field(description="Probability the statement is true")
+    noul: Probability = Field(description="Probability the statement is true")
 
 
 class ChoiceAnswer(BaseModel):
     type: Literal["choice"] = "choice"
     choice: str = Field(description="The option the model picked")
-    probabilities: Dict[str, float] = Field(description="Probability of each option")
-    confidence: float = Field(description="How concentrated the distribution is: 0 uniform, 1 certain")
+    probabilities: Dict[str, Probability] = Field(description="Probability of each option")
+    confidence: Probability = Field(description="How concentrated the distribution is: 0 uniform, 1 certain")
 
 
 class ScoreAnswer(BaseModel):
     type: Literal["score"] = "score"
     score: float = Field(description="Expected level index, counting from 0 at the lowest level")
     legend: Dict[str, str] = Field(default_factory=dict, description="Level index -> the level it stands for")
-    probabilities: Dict[str, float] = Field(description="Probability of each level index")
-    confidence: float = Field(description="How tightly the mass clusters on the scale")
+    probabilities: Dict[str, Probability] = Field(description="Probability of each level index")
+    confidence: Probability = Field(description="How tightly the mass clusters on the scale")
 
 
 Answer = Annotated[Union[NoulAnswer, ChoiceAnswer, ScoreAnswer], Field(discriminator="type")]
@@ -406,10 +408,12 @@ class DeciderBackend(BaseEvaluator):
             raise ValueError(f"The request does not match the /v1/systemone contract: {e}") from e
         return request.model_dump(exclude_none=True)
 
-    def _read(self, response: Any, output_schema: Type[BaseModel]) -> BaseModel:
+    def _read(self, response: Any, output_schema: Type[BaseModel], questions: Dict[str, Any]) -> BaseModel:
         response.raise_for_status()
         try:
-            return output_schema(**response.json())
+            output = output_schema(**response.json())
+            _check_answers(output.answers, questions)
+            return output
         except (KeyError, TypeError, ValueError) as e:
             raise ResponseError(f"Could not read the server's answer into {output_schema.__name__}: {e!r}") from e
 
@@ -424,7 +428,7 @@ class DeciderBackend(BaseEvaluator):
             response = self.client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            return self._read(response, output_schema)
+            return self._read(response, output_schema, body["questions"])
         except Exception as e:
             return _to_error(e)
 
@@ -441,9 +445,29 @@ class DeciderBackend(BaseEvaluator):
             response = await self.async_client.post(
                 f"{self.base_url}/v1/systemone", json=body, headers=self._headers
             )
-            return self._read(response, output_schema)
+            return self._read(response, output_schema, body["questions"])
         except Exception as e:
             return _to_error(e)
+
+
+def _check_answers(answers: Dict[str, Any], questions: Dict[str, Any]) -> None:
+    """The answers must answer what was asked: one per question, of the question's type, over
+    the question's own options or levels."""
+    if set(answers) != set(questions):
+        missing, extra = sorted(set(questions) - set(answers)), sorted(set(answers) - set(questions))
+        raise ValueError(f"answers do not match the questions asked (missing {missing}, unexpected {extra})")
+    for name, question in questions.items():
+        answer = answers[name]
+        if answer.type != question["type"]:
+            raise ValueError(f"'{name}' is a {question['type']} question but got a {answer.type} answer")
+        if answer.type == "choice":
+            options = set(question["criteria"])
+            if set(answer.probabilities) != options or answer.choice not in options:
+                raise ValueError(f"'{name}' was answered over {sorted(answer.probabilities)}, not its options {sorted(options)}")
+        elif answer.type == "score":
+            levels = [str(i) for i in range(len(question["criteria"]))]
+            if set(answer.probabilities) != set(levels) or not 0 <= answer.score <= len(levels) - 1:
+                raise ValueError(f"'{name}' was answered outside its {len(levels)} levels")
 
 
 class ModelMismatchError(Exception):

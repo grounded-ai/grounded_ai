@@ -127,6 +127,77 @@ def test_all_three_question_types_in_one_request(evaluator):
     assert result.usage["output_tokens"] == 3
 
 
+VARIETY = [
+    pytest.param("Charged twice.", NoulQuestion(instructions="This is a complaint."), NoulAnswer, id="noul"),
+    pytest.param(
+        "Charged twice.",
+        NoulQuestion(instructions="It is urgent.", criteria={"true": "needs a reply today", "false": "can wait"}),
+        NoulAnswer,
+        id="noul-with-criteria",
+    ),
+    pytest.param(
+        {"policy": "Refunds within 30 days.", "response": "You have 90 days."},
+        NoulQuestion(instructions={"claim": "The response agrees with the policy.", "scope": "refund window"}),
+        NoulAnswer,
+        id="noul-instructions-as-object",
+    ),
+    pytest.param(
+        [{"role": "user", "content": "Why was I charged twice?"}, {"role": "assistant", "content": "Sorry! Refunded."}],
+        ChoiceQuestion(instructions="How does the assistant sound?", criteria={"apologetic": "", "defensive": "", "neutral": ""}),
+        ChoiceAnswer,
+        id="choice-over-a-list-state",
+    ),
+    pytest.param(
+        "Merci beaucoup, tout fonctionne maintenant.",
+        ChoiceQuestion(instructions="Quelle langue ?", criteria={"français": "écrit en français", "日本語": "日本語で書かれている"}),
+        ChoiceAnswer,
+        id="choice-unicode",
+    ),
+    pytest.param(
+        "The invoice total is wrong.",
+        ChoiceQuestion(instructions="Which topic?", criteria={f"topic-{i}": f"about subject number {i}" for i in range(24)}),
+        ChoiceAnswer,
+        id="choice-24-options",
+    ),
+    pytest.param(
+        {"ticket": {"id": 7, "tags": ["billing", "urgent"], "paid": True, "notes": None, "amount": 12.5}},
+        ScoreQuestion(instructions="How serious is it?", criteria=["minor", "serious"]),
+        ScoreAnswer,
+        id="score-two-levels-nested-state",
+    ),
+    pytest.param(
+        "The explanation was clear and complete.",
+        ScoreQuestion(instructions="Rate the explanation from 1 to 10.", criteria=[str(i) for i in range(1, 11)]),
+        ScoreAnswer,
+        id="score-ten-levels",
+    ),
+]
+
+
+@pytest.mark.parametrize("state,question,answer_type", VARIETY)
+def test_the_real_server_accepts_and_answers_every_shape(evaluator, state, question, answer_type):
+    """A DeciderOutput back means the request was accepted and the answer matched the question:
+    its type, and its probabilities over exactly the options or levels that were asked."""
+    answer = ask(evaluator, state, q=question).answers["q"]
+    assert isinstance(answer, answer_type)
+    if isinstance(question, ChoiceQuestion):
+        assert list(answer.probabilities) == list(question.criteria)
+        assert answer.choice == max(answer.probabilities, key=answer.probabilities.get)
+    if isinstance(question, ScoreQuestion):
+        assert answer.legend == {str(i): level for i, level in enumerate(question.criteria)}
+        expected = sum(int(level) * probability for level, probability in answer.probabilities.items())
+        assert answer.score == pytest.approx(expected, abs=0.01)  # the score is the expected level
+
+
+def test_the_real_server_refuses_what_the_input_class_refuses(evaluator):
+    """The contract check is not stricter or looser than the server on a one-option choice."""
+    response = evaluator.backend.client.post(
+        f"http://127.0.0.1:{PORT}/v1/systemone",
+        json={"state": "x", "model": CHECKPOINT, "questions": {"q": {"type": "choice", "instructions": "Q?", "criteria": {"only": ""}}}},
+    )
+    assert response.status_code == 422
+
+
 def test_custom_input_class(evaluator):
     class CodeReview(DeciderInput):
         language: str

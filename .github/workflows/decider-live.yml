@@ -9,6 +9,7 @@ on:
       - "grounded_ai/backends/decider.py"
       - "grounded_ai/__init__.py"
       - "tests/integration/**"
+      - "tests/test_decider_contract.py"
       - "examples/backends/strands_decider.ipynb"
       - ".github/workflows/decider-live.yml"
       - ".github/scripts/decider_live_report.py"
@@ -56,6 +57,8 @@ jobs:
     - name: Run the live tests
       run: |
         set -o pipefail
+        # The contract tests also run here: with the server installed they check our classes against its wire types.
+        pytest tests/test_decider_contract.py -q
         pytest tests/integration -s -v | tee live-tests.txt
 
     - name: Run the example notebook
