@@ -16,6 +16,10 @@ concurrency:
   group: decider-live-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   live:
     runs-on: ubuntu-latest
@@ -49,7 +53,9 @@ jobs:
         pip install -e ".[decider]" pytest pytest-asyncio nbconvert ipykernel
 
     - name: Run the live tests
-      run: pytest tests/integration -s -v
+      run: |
+        set -o pipefail
+        pytest tests/integration -s -v | tee live-tests.txt
 
     - name: Run the example notebook
       run: |
@@ -63,3 +69,13 @@ jobs:
         name: strands-decider-notebook
         path: executed/
         if-no-files-found: ignore
+
+    # The real model's answers, where a reviewer can read them without opening the logs.
+    - name: Post the results on the pull request
+      if: always() && github.event_name == 'pull_request'
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        python .github/scripts/decider_live_report.py > report.md
+        gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
