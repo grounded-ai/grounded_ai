@@ -292,7 +292,7 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 
 ```python
 Evaluator(
-    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/..."
+    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/...", "decider/..."
     eval_mode: str,  # Required for Grounded AI SLMs only ("TOXICITY", "HALLUCINATION", "RAG_RELEVANCE")
     **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1)
 )
@@ -316,6 +316,29 @@ class EvaluationOutput(BaseModel):
     label: str         # e.g. "faithful", "toxic", "relevant"
     confidence: float  # 0.0 to 1.0
     reasoning: str     # Explanation
+```
+
+### Decider backend
+
+The Decider backend has its own input and output (see [Decision Models](#7-decision-models-strands-decider)):
+
+```python
+Evaluator("decider/<checkpoint>", base_url=None, api_key=None, timeout=30.0, input_schema=DeciderInput)
+evaluator.backend.warmup(port=8000, checkpoint=None, device=None, timeout=600.0, verbose=False)
+evaluator.backend.shutdown()
+
+evaluate(
+    DeciderInput(
+        questions: Dict[str, NoulQuestion | ChoiceQuestion | ScoreQuestion],  # what the model is asked
+        state: str | dict | list,                                             # what the model reads
+    )
+) -> DeciderOutput | EvaluationError
+
+class DeciderOutput(BaseModel):
+    answers: Dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]  # one per question
+    model: str
+    usage: Dict[str, int]
+    latency_ms: float
 ```
 
 ## Contributing
