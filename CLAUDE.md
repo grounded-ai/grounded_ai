@@ -14,7 +14,7 @@ grounded_ai/
     anthropic.py
     bedrock.py
     huggingface.py
-    decider.py         # /v1/systemone client: one typed question per output-schema field
+    decider.py         # /v1/systemone client: DeciderInput (state + questions) -> DeciderOutput (answers); warmup() starts the server
     grounded_ai_slm/
       backend.py       # PEFT adapter loading, prompt formatting, XML parsing
       prompts.py       # Jinja2 templates for TOXICITY / RAG_RELEVANCE / HALLUCINATION

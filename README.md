@@ -164,109 +164,96 @@ print(result.score) # 0.99
 
 ```bash
 pip install grounded-ai[decider]   # adds httpx and the strands-decider server
-strands-decider serve StrandsAgents/strands-decider-2B-hobson-v19 --port 8000
 ```
 
 ```python
-# The model name is the checkpoint the server is running; the first call checks it.
-# eval_mode works like the SLM backend: HALLUCINATION (default), TOXICITY or RAG_RELEVANCE.
-evaluator = Evaluator("decider/strands-decider-2B-hobson-v19", eval_mode="HALLUCINATION")
+from grounded_ai import Evaluator
+from grounded_ai.backends.decider import HALLUCINATION
+
+# The model name is the checkpoint to serve. warmup() starts the server and waits until it is ready.
+evaluator = Evaluator("decider/StrandsAgents/strands-decider-2B-hobson-v19")
+evaluator.backend.warmup(port=8000)
 
 result = evaluator.evaluate(
     query="How long do I have to return an item?",
     context="Refunds are accepted within 30 days of purchase.",
     response="You have 90 days to request a refund.",
+    questions={"verdict": HALLUCINATION},
 )
-print(result.label)       # 'hallucination'
-print(result.score)       # 0.935: probability of hallucination, read off the model
-print(result.confidence)  # 0.871: |2p - 1|, 0 at a coin flip, 1 at certainty
+verdict = result.answers["verdict"]
+print(verdict.choice)         # 'hallucination'
+print(verdict.probabilities)  # {'hallucination': 0.935, 'faithful': 0.065}
+print(verdict.confidence)     # 0.871
 ```
 
-The server address defaults to `http://127.0.0.1:8000` (override with `base_url=` or `DECIDER_BASE_URL`). Generation arguments like `temperature` are accepted as on every backend; a decision model does not sample, so they have no effect. Any other unknown argument gets a warning.
+**The server.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint you named.
 
-`eval_mode` is case-insensitive and can also be passed to a single `evaluate()` call. `/v1/systemone` has no system message, so `system_prompt` is not sent (passing one warns); the question comes from `eval_mode` or the field descriptions.
+**The contract.** A request is a `state` (what the model reads) and named `questions` (what it is asked); the response is one answer per question. Both sides are fixed classes that mirror the model:
 
-**Custom evaluations.** As on the OpenAI and Anthropic backends, an evaluation of your own is an output schema: subclass `EvaluationOutput` and make `label` a `Literal` (or `Enum`) of your options. The field's `description` is the question, `score` is the probability of the first option, and with two options `label` is the first one when `score >= threshold`.
+| Question | You give | Answer | You get |
+| :--- | :--- | :--- | :--- |
+| `NoulQuestion` | `instructions` (a yes/no statement) | `NoulAnswer` | `.noul` (probability it is true) |
+| `ChoiceQuestion` | `instructions`, `criteria` {option: description} | `ChoiceAnswer` | `.choice`, `.probabilities`, `.confidence` |
+| `ScoreQuestion` | `instructions`, `criteria` [levels, lowest first] | `ScoreAnswer` | `.score` (level index from 0), `.legend`, `.probabilities`, `.confidence` |
 
 ```python
-class BrandVoice(EvaluationOutput):
-    label: Literal["on-brand", "off-brand"] = Field(
-        description="Is the response written in our brand voice? "
-                    "on-brand: friendly, plain words, no jargon. off-brand: formal, salesy or full of jargon."
-    )
+from grounded_ai.backends.decider import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
-evaluator.evaluate(
-    response="No worries, we've refunded you. It should show up in a few days.",
-    output_schema=BrandVoice,
-).label
-# 'on-brand'
+result = evaluator.evaluate(
+    response="You have charged me twice and my account is now overdrawn. Fix it today.",
+    questions={
+        "urgent": NoulQuestion(instructions="This needs a reply within the hour."),
+        "area": ChoiceQuestion(
+            instructions="Which team owns it?",
+            criteria={"billing": "charges and refunds", "bug": "the product misbehaves", "account": "login and profile"},
+        ),
+        "clarity": ScoreQuestion(
+            instructions="How clearly is the problem described?",
+            criteria=["unclear", "partly clear", "clear"],
+        ),
+    },
+)
+result.answers["urgent"].noul          # 0.91
+result.answers["area"].choice          # 'billing'
+result.answers["clarity"].score        # 1.8
 ```
 
-**Custom templates.** As on every backend, a custom `base_template` is rendered and becomes what the model reads, so you can put rules or extra context in front of the text:
+The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). It is the model's contract, so `output_schema` cannot replace it. `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
+
+**Custom inputs.** The input is the part you shape. `DeciderInput` is `EvaluationInput` plus `questions` and `state`:
+
+- Pass `response`, `query`, `context`: they are sent to the model as a JSON object, context first.
+- Subclass `DeciderInput` and add your own fields: they are sent the same way.
+- Use a `base_template` (per call, or as a subclass default): the rendered text is sent.
+- Set `state` yourself (text or any JSON): it is sent as is.
 
 ```python
-class RuleCheck(EvaluationOutput):
-    label: Literal["violates", "follows"] = Field(description="Does the text follow the rule?")
+from grounded_ai.backends.decider import DeciderInput
+
+class SupportTurn(DeciderInput):
+    customer_message: str
+    agent_reply: str
+
+evaluator.evaluate(SupportTurn(
+    customer_message="Why was I charged twice?",
+    agent_reply="Sorry about that! The duplicate charge is refunded.",
+    questions={"apologizes": NoulQuestion(instructions="The agent apologizes.")},
+))
 
 evaluator.evaluate(
     response="The API endpoint defaults to port 8080.",
     base_template="Rule: services must only listen on port 443.\nText: {{ response }}",
-    output_schema=RuleCheck,
-).label
-# 'violates'
+    questions={"verdict": ChoiceQuestion(
+        instructions="Does the text follow the rule?",
+        criteria={"violates": "the text breaks the rule", "follows": "the text obeys the rule"},
+    )},
+)
 ```
-
-Without a custom template, the backend sends `context`, `query` and `response` as labelled fields, context first.
-
-**Custom schemas.** An output schema maps one-to-one onto what the model returns. `/v1/systemone` answers three question types, and each field is exactly one of them. The field's `description` is the question (the field name is used when there is none), and all fields are asked in one request.
-
-| Question type | Field type | Value |
-| :--- | :--- | :--- |
-| `noul` | `float` bounded to `[0, 1]` | the probability the statement is true |
-| `noul` | `bool` | that probability >= `threshold` |
-| `choice` | `Literal` / `Enum` (two or more options) | the option the model picked |
-| `score` | `int` or `float` with `ge`/`le` bounds, 2 to 10 values | a rating over ordered levels (`int`: the most probable level, `float`: the expected value) |
-
-```python
-class Ticket(BaseModel):
-    urgent: bool = Field(description="Does this need a reply within the hour?")
-    p_churn: float = Field(ge=0, le=1, description="Is this customer about to leave?")
-    area: Literal["billing", "bug", "account"]
-    clarity: int = Field(ge=1, le=5, description="Rate how clearly the problem is described.")
-
-evaluator.evaluate(response="Charged twice, fix it now.", output_schema=Ticket)
-```
-
-Those fields hold the value only. To get the model's whole answer, with its probabilities and confidence, type the field as the answer itself:
-
-| Field type | You get |
-| :--- | :--- |
-| `Noul` | `.noul` |
-| `Choice[Literal["a", "b", "c"]]` | `.choice`, `.probabilities`, `.confidence` |
-| `Score[Literal["poor", "ok", "great"]]` (levels, lowest first) | `.score` (level index from 0), `.legend`, `.probabilities`, `.confidence` |
-
-```python
-from grounded_ai.backends.decider import Choice, Noul, Score
-
-class Review(BaseModel):
-    security_risk: Noul
-    severity: Choice[Literal["low", "medium", "high"]]
-    complexity: Score[Literal["trivial", "simple", "moderate", "complex"]]
-
-r = evaluator.evaluate(response=code, output_schema=Review)
-r.severity.choice, r.severity.probabilities, r.severity.confidence
-```
-
-Nothing else maps: a required field of any other type (`str`, lists, nested models) returns an `INVALID_REQUEST` error, and one with a default is left at its default (this is why `reasoning` is always `None`).
-
-The stock `EvaluationOutput` is one `choice` question set by `eval_mode`. Extra fields on a subclass are asked by the table above, in the same request.
-
-**Custom inputs.** The request's `state` is a string or a JSON object, so any Pydantic input model works: its fields are sent as an object (nested values included), or its own `formatted_prompt` / a `base_template` overridden per call or as a subclass default is rendered and sent as text.
 
 The server truncates input that overflows the model's window from the end, without an error. The backend warns when the input is clearly too long (a rough character-count check against the window `/health` reports).
 
 On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).
-    
+
 ## Implementation Status
 
 | Backend | Status | Description |
@@ -283,9 +270,9 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 
 | Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace | Strands Decider |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ➖ no system message; `eval_mode` is the question |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` / labelled fields |
-| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 One typed question per field |
+| **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ➖ no system message |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `DeciderInput`: fields, template or `state` |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 Fixed `DeciderOutput` (typed answers) |
 
 ## API Reference
 

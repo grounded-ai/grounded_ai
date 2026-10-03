@@ -78,15 +78,22 @@ class Evaluator:
         Splits kwargs into input-construction fields and backend runtime args.
         Returns (input_data, backend_kwargs).
         """
-        input_kwargs = {k: v for k, v in kwargs.items() if k in _INPUT_FIELDS}
-        backend_kwargs = {k: v for k, v in kwargs.items() if k not in _INPUT_FIELDS}
+        # The backend's own input schema is used when it extends EvaluationInput (the Decider
+        # backend's DeciderInput adds `questions` and `state`), so its fields can be passed here too.
+        schema = self.backend.input_schema
+        if not (isinstance(schema, type) and issubclass(schema, EvaluationInput)):
+            schema = EvaluationInput
+        fields = _INPUT_FIELDS | set(schema.model_fields)
+        input_kwargs = {k: v for k, v in kwargs.items() if k in fields}
+        backend_kwargs = {k: v for k, v in kwargs.items() if k not in fields}
 
         if isinstance(input_data, GenAIConversation):
-            input_data = EvaluationInput(response=input_data.to_evaluation_string())
+            conversation_kwargs = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS}
+            input_data = schema(response=input_data.to_evaluation_string(), **conversation_kwargs)
         elif isinstance(input_data, str):
-            input_data = EvaluationInput(response=input_data, **input_kwargs)
+            input_data = schema(response=input_data, **input_kwargs)
         elif input_data is None:
-            input_data = EvaluationInput(**input_kwargs)
+            input_data = schema(**input_kwargs)
 
         return input_data, backend_kwargs
 
