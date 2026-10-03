@@ -78,20 +78,21 @@ class Evaluator:
         Splits kwargs into input-construction fields and backend runtime args.
         Returns (input_data, backend_kwargs).
         """
-        # The backend's own input schema is used when it extends EvaluationInput (the Decider
-        # backend's DeciderInput adds `questions` and `state`), so its fields can be passed here too.
-        schema = self.backend.input_schema
-        if not (isinstance(schema, type) and issubclass(schema, EvaluationInput)):
-            schema = EvaluationInput
-        fields = _INPUT_FIELDS | set(schema.model_fields)
+        # A backend with its own input class (the Decider backend's DeciderInput) names the field
+        # a bare string goes into; every other backend takes the stock EvaluationInput.
+        primary = getattr(self.backend, "primary_input_field", None)
+        if primary:
+            schema, fields = self.backend.input_schema, set(self.backend.input_schema.model_fields)
+        else:
+            schema, fields, primary = EvaluationInput, _INPUT_FIELDS, "response"
         input_kwargs = {k: v for k, v in kwargs.items() if k in fields}
         backend_kwargs = {k: v for k, v in kwargs.items() if k not in fields}
 
         if isinstance(input_data, GenAIConversation):
-            conversation_kwargs = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS}
-            input_data = schema(response=input_data.to_evaluation_string(), **conversation_kwargs)
+            other = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS and k != primary}
+            input_data = schema(**{primary: input_data.to_evaluation_string()}, **other)
         elif isinstance(input_data, str):
-            input_data = schema(response=input_data, **input_kwargs)
+            input_data = schema(**{primary: input_data}, **input_kwargs)
         elif input_data is None:
             input_data = schema(**input_kwargs)
 

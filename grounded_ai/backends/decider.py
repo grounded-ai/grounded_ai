@@ -7,11 +7,11 @@ import time
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Type, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing_extensions import Annotated
 
 from ..base import BaseEvaluator
-from ..schemas import EvaluationError, EvaluationInput
+from ..schemas import EvaluationError
 
 try:
     import httpx
@@ -32,6 +32,8 @@ Content = Union[str, Dict[str, Any], List[Any]]
 class NoulQuestion(BaseModel):
     """Yes/no: is the statement true of the state?"""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["noul"] = "noul"
     instructions: Content
     # Optional {"true": "...", "false": "..."} descriptions that sharpen the boundary.
@@ -48,6 +50,8 @@ class NoulQuestion(BaseModel):
 class ChoiceQuestion(BaseModel):
     """Pick one of the named options. `criteria` maps option name -> description."""
 
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["choice"] = "choice"
     instructions: Content
     criteria: Dict[str, str] = Field(min_length=2, max_length=255)
@@ -55,6 +59,8 @@ class ChoiceQuestion(BaseModel):
 
 class ScoreQuestion(BaseModel):
     """Rate against ordered levels. `criteria` lists them lowest first."""
+
+    model_config = ConfigDict(extra="forbid")
 
     type: Literal["score"] = "score"
     instructions: Content
@@ -112,49 +118,68 @@ RAG_RELEVANCE = ChoiceQuestion(
     },
 )
 
-# State field order: the model reads the evidence before the text being judged.
-_STATE_ORDER = ("context", "query", "response")
-_NOT_STATE = {"questions", "state", "base_template", "formatted_prompt"}
+class SystemOneRequest(BaseModel):
+    """The body of `POST /v1/systemone`. Every request is validated against this before it is
+    sent, so no input class, however it is customized, can put anything else on the wire."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Content
+    questions: Dict[str, Question] = Field(min_length=1)
+    model: str
+
+    @field_validator("state")
+    @classmethod
+    def _not_empty(cls, v):
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("state must not be empty")
+        return v
 
 
-class DeciderInput(EvaluationInput):
+# --- The classes people work with ---------------------------------------------------------------
+#
+# These are the Decider backend's own input and output. They are not EvaluationInput and
+# EvaluationOutput: those describe a text-generating judge (response/query/context, a prompt
+# template, a free-form label and reasoning), which is not this model's contract.
+
+
+class DeciderInput(BaseModel):
     """
     Input for the Decider backend: the two things a `/v1/systemone` request is made of.
 
-    - `questions`: what the model is asked, by name. Sent as is.
-    - `state`: what the model reads. Sent as is when set. When left unset it is built from the
-      other fields: `response`, `query`, `context` and any fields a subclass adds are sent as a
-      JSON object, or, with a custom `base_template`, the rendered template is sent as text.
+    - `questions`: what the model is asked, by name.
+    - `state`: what the model reads, as text or JSON.
 
-    Subclass it to add your own fields or a default template. The questions and the answers
-    they produce are the model's contract and stay as they are.
+    To customize the input, subclass it and add your own fields: when `state` is not given,
+    your fields are sent as a JSON object, in the order you declare them (put the evidence
+    before the text being judged). For full control, override `build_state()`.
+
+    Only the state can be shaped this way. Whatever a subclass does, the request is validated
+    against the model's contract before it is sent.
     """
+
+    model_config = ConfigDict(extra="forbid")  # a misspelt or foreign field is an error, not silently dropped
 
     questions: Dict[str, Question] = Field(min_length=1)
     state: Optional[Content] = None
 
-    def request_state(self) -> Content:
-        """The `state` of the request."""
+    def build_state(self) -> Content:
+        """What the model reads. Override to render your fields your own way; return text or JSON."""
         if self.state is not None:
-            if isinstance(self.state, str) and not self.state.strip():
-                raise ValueError("state is empty: there is nothing to evaluate.")
             return self.state
-        stock_prompt = type(self).formatted_prompt is EvaluationInput.formatted_prompt
-        stock_template = self.base_template == EvaluationInput.model_fields["base_template"].default
-        if not (stock_prompt and stock_template):
-            text = self.formatted_prompt
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError("The rendered template is empty: there is nothing to evaluate.")
-            return text
-        data = self.model_dump(mode="json", exclude=_NOT_STATE, exclude_none=True)
+        own_fields = [name for name in type(self).model_fields if name not in DeciderInput.model_fields]
+        data = self.model_dump(mode="json", include=set(own_fields), exclude_none=True)
         if not data:
-            raise ValueError("The input has no fields set: there is nothing to evaluate.")
-        ordered = {k: data.pop(k) for k in _STATE_ORDER if k in data}
-        return {**ordered, **data}
+            raise ValueError(
+                "Nothing to evaluate: set `state`, or subclass DeciderInput and fill in your own fields."
+            )
+        return {name: data[name] for name in own_fields if name in data}
 
 
 class DeciderOutput(BaseModel):
-    """What `/v1/systemone` returns: one answer per question, under the question's name."""
+    """What `/v1/systemone` returns: one answer per question, under the question's name.
+
+    This is the model's contract and the only thing the Decider backend returns."""
 
     answers: Dict[str, Answer]
     model: Optional[str] = Field(None, description="The model name the server reports")
@@ -173,7 +198,9 @@ class DeciderBackend(BaseEvaluator):
     no `system_prompt`, `temperature` or other generation arguments.
 
     The input is a DeciderInput (state + questions) and the output is a DeciderOutput (answers).
-    Both mirror the model's contract. Customize the input by subclassing DeciderInput.
+    They are this backend's own classes, not EvaluationInput/EvaluationOutput, and they mirror
+    the model's contract. Customize the input by subclassing DeciderInput; the contract itself
+    cannot be changed, and every request is validated against it before it is sent.
 
     The server, not the request, decides which model answers: `strands-decider serve <checkpoint>`
     loads one checkpoint and ignores the request's `model` field. `model_name` therefore names the
@@ -183,6 +210,9 @@ class DeciderBackend(BaseEvaluator):
     `warmup(port=...)` starts that server for you.
     """
 
+    # Evaluator("decider/...").evaluate("some text", questions=...) puts the text here.
+    primary_input_field = "state"
+
     def __init__(
         self,
         model_name: str,
@@ -191,10 +221,11 @@ class DeciderBackend(BaseEvaluator):
         timeout: float = 30.0,
         client: Optional[Any] = None,
         async_client: Optional[Any] = None,
-        input_schema: Type[BaseModel] = DeciderInput,
-        output_schema: Type[BaseModel] = DeciderOutput,
+        input_schema: Type[DeciderInput] = DeciderInput,
     ):
-        super().__init__(input_schema=input_schema, output_schema=output_schema)
+        if not (isinstance(input_schema, type) and issubclass(input_schema, DeciderInput)):
+            raise TypeError("input_schema must be DeciderInput or a subclass of it.")
+        super().__init__(input_schema=input_schema, output_schema=DeciderOutput)
         if httpx is None:
             raise ImportError(
                 "httpx package is not installed. Please install it via `pip install grounded-ai[decider]`."
@@ -338,25 +369,30 @@ class DeciderBackend(BaseEvaluator):
         """The request body, taken straight from the input: its state and its questions."""
         if kwargs:
             raise ValueError(
-                f"DeciderBackend takes no runtime arguments, got {sorted(kwargs)}. A decision model "
-                "has no system message and does not sample; what it is asked comes from `questions`."
+                f"DeciderBackend does not take {sorted(kwargs)}. Its input is `questions` and `state` "
+                f"(plus the fields of {self.input_schema.__name__}); a decision model has no system "
+                "message and does not sample, so there are no generation arguments."
             )
         if not isinstance(input_data, DeciderInput):
             raise ValueError(
                 f"The Decider backend needs a DeciderInput (or a subclass), got {type(input_data).__name__}. "
                 "It carries the `questions` the model is asked."
             )
-        if not (isinstance(output_schema, type) and issubclass(output_schema, DeciderOutput)):
+        if output_schema is not DeciderOutput:
             raise ValueError(
                 "The Decider backend returns a DeciderOutput: its answers are the model's contract and "
                 f"cannot be reshaped into {getattr(output_schema, '__name__', output_schema)}. "
                 "Customize the input (DeciderInput) instead."
             )
-        return {
-            "state": input_data.request_state(),
-            "model": self.model_name,
-            "questions": {name: q.model_dump(exclude_none=True) for name, q in input_data.questions.items()},
+        questions = {
+            name: q.model_dump(exclude_none=True) if isinstance(q, BaseModel) else q
+            for name, q in dict(input_data.questions).items()
         }
+        try:
+            request = SystemOneRequest(state=input_data.build_state(), questions=questions, model=self.model_name)
+        except ValidationError as e:
+            raise ValueError(f"The request does not match the /v1/systemone contract: {e}") from e
+        return request.model_dump(exclude_none=True)
 
     def _read(self, response: Any, output_schema: Type[BaseModel]) -> BaseModel:
         response.raise_for_status()

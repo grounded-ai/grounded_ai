@@ -175,9 +175,11 @@ evaluator = Evaluator("decider/StrandsAgents/strands-decider-2B-hobson-v19")
 evaluator.backend.warmup(port=8000)
 
 result = evaluator.evaluate(
-    query="How long do I have to return an item?",
-    context="Refunds are accepted within 30 days of purchase.",
-    response="You have 90 days to request a refund.",
+    state={
+        "context": "Refunds are accepted within 30 days of purchase.",
+        "query": "How long do I have to return an item?",
+        "response": "You have 90 days to request a refund.",
+    },
     questions={"verdict": HALLUCINATION},
 )
 verdict = result.answers["verdict"]
@@ -200,7 +202,7 @@ print(verdict.confidence)     # 0.871
 from grounded_ai.backends.decider import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
 result = evaluator.evaluate(
-    response="You have charged me twice and my account is now overdrawn. Fix it today.",
+    "You have charged me twice and my account is now overdrawn. Fix it today.",   # a bare string is the state
     questions={
         "urgent": NoulQuestion(instructions="This needs a reply within the hour."),
         "area": ChoiceQuestion(
@@ -218,14 +220,15 @@ result.answers["area"].choice          # 'billing'
 result.answers["clarity"].score        # 1.8
 ```
 
-The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). It is the model's contract, so `output_schema` cannot replace it. `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
+The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they refer to "the response", "the context" and "the query", so name those in your state. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
 
-**Custom inputs.** The input is the part you shape. `DeciderInput` is `EvaluationInput` plus `questions` and `state`:
+**Its own input and output.** `DeciderInput` and `DeciderOutput` are separate from `EvaluationInput` and `EvaluationOutput`, which describe a text-generating judge. `DeciderInput` has exactly two fields, `questions` and `state`, and `output_schema` cannot replace `DeciderOutput`.
 
-- Pass `response`, `query`, `context`: they are sent to the model as a JSON object, context first.
-- Subclass `DeciderInput` and add your own fields: they are sent the same way.
-- Use a `base_template` (per call, or as a subclass default): the rendered text is sent.
-- Set `state` yourself (text or any JSON): it is sent as is.
+**Custom inputs.** The state is the part you shape:
+
+- Pass `state` as text or any JSON: it is sent as is.
+- Subclass `DeciderInput` and add your own fields: they are sent as a JSON object, in the order you declare them (put the evidence before the text being judged).
+- Override `build_state()` to render your fields any way you like.
 
 ```python
 from grounded_ai.backends.decider import DeciderInput
@@ -240,15 +243,24 @@ evaluator.evaluate(SupportTurn(
     questions={"apologizes": NoulQuestion(instructions="The agent apologizes.")},
 ))
 
-evaluator.evaluate(
-    response="The API endpoint defaults to port 8080.",
-    base_template="Rule: services must only listen on port 443.\nText: {{ response }}",
+class PortPolicy(DeciderInput):
+    text: str
+
+    def build_state(self):
+        return f"Rule: services must only listen on port 443.\nText: {self.text}"
+
+evaluator.evaluate(PortPolicy(
+    text="The API endpoint defaults to port 8080.",
     questions={"verdict": ChoiceQuestion(
         instructions="Does the text follow the rule?",
         criteria={"violates": "the text breaks the rule", "follows": "the text obeys the rule"},
     )},
-)
+))
 ```
+
+To use your class with keyword arguments, pass it once: `Evaluator("decider/...", input_schema=SupportTurn)`, then `evaluator.evaluate(customer_message=..., agent_reply=..., questions=...)`.
+
+**The contract cannot be broken.** Whatever an input class does, the request is validated against the `/v1/systemone` contract before it is sent: a state that is not text or JSON, an unknown question type, a stray key on a question, or no questions at all returns `INVALID_REQUEST` and nothing goes to the server.
 
 The server truncates input that overflows the model's window from the end, without an error. The backend warns when the input is clearly too long (a rough character-count check against the window `/health` reports).
 
@@ -271,7 +283,7 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 | Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace | Strands Decider |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ➖ no system message |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `DeciderInput`: fields, template or `state` |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `DeciderInput`: `state` or your own fields |
 | **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 Fixed `DeciderOutput` (typed answers) |
 
 ## API Reference
