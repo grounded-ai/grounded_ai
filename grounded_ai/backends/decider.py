@@ -4,9 +4,9 @@ import os
 import types
 import typing
 import warnings
-from typing import Any, Dict, Optional, Tuple, Type, Union
+from typing import Any, Dict, Generic, Optional, Tuple, Type, TypeVar, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..base import BaseEvaluator
 from ..schemas import EvaluationError, EvaluationInput, EvaluationOutput
@@ -73,6 +73,32 @@ _MIN_LEVELS, _MAX_LEVELS = 2, 10
 _UNION_TYPES = (Union,) + ((types.UnionType,) if hasattr(types, "UnionType") else ())
 
 
+T = TypeVar("T")
+
+
+class Noul(BaseModel):
+    """The whole answer to a yes/no question, as `/v1/systemone` returns it."""
+
+    noul: float = Field(ge=0.0, le=1.0, description="Probability the statement is true")
+
+
+class Choice(BaseModel, Generic[T]):
+    """The whole answer to a pick-one question. Give the options: `Choice[Literal["a", "b", "c"]]`."""
+
+    choice: T = Field(description="The option the model picked")
+    probabilities: Dict[str, float] = Field(description="Probability of each option")
+    confidence: float = Field(description="How concentrated the distribution is: 0 uniform, 1 certain")
+
+
+class Score(BaseModel, Generic[T]):
+    """The whole answer to a rating. Give the levels, lowest first: `Score[Literal["poor", "ok", "great"]]`."""
+
+    score: float = Field(description="Expected level index, counting from 0 at the lowest level")
+    legend: Dict[str, str] = Field(default_factory=dict, description="Level index -> the level it stands for")
+    probabilities: Dict[str, float] = Field(description="Probability of each level index")
+    confidence: float = Field(description="How tightly the mass clusters on the scale")
+
+
 class DeciderBackend(BaseEvaluator):
     """
     Backend for Strands Decider (`strands-decider serve`), a local decision model that
@@ -89,6 +115,13 @@ class DeciderBackend(BaseEvaluator):
                 bool                            -> that probability >= threshold
         choice  Literal / Enum                  -> the option the model picked
         score   int or float with ge/le bounds  -> a rating over 2-10 ordered levels
+
+    Those fields hold the value only. To get the whole answer, with its probabilities and
+    confidence, type the field as the answer itself:
+
+        Noul                              -> noul
+        Choice[Literal["a", "b", "c"]]    -> choice, probabilities, confidence
+        Score[Literal["poor", "great"]]   -> score, legend, probabilities, confidence
 
     The field's `description` is the question (the field name is used when there is none).
     Nothing else can be answered: a required field of any other type is refused with
@@ -275,12 +308,14 @@ class DeciderBackend(BaseEvaluator):
             if kind == "skip":
                 continue
             text = field.description or name.replace("_", " ")
-            if kind == "choice":
+            if kind in ("choice", "choice_answer"):
                 out[name] = {"type": "choice", "instructions": text, "criteria": {o: "" for o in info}}
+            elif kind == "score_answer":
+                out[name] = {"type": "score", "instructions": text, "criteria": list(info)}
             elif kind == "level":
                 low, high, _ = info
                 out[name] = {"type": "score", "instructions": text, "criteria": [str(v) for v in range(low, high + 1)]}
-            else:  # bool, prob
+            else:  # bool, prob, noul_answer
                 out[name] = {"type": "noul", "instructions": text}
 
     def _request(
@@ -330,6 +365,12 @@ class DeciderBackend(BaseEvaluator):
             kind, info = _field_spec(name, field)
             if kind == "choice":
                 values[name] = info[answers[name]["choice"]]
+            elif kind == "choice_answer":
+                values[name] = {**answers[name], "choice": info[answers[name]["choice"]]}
+            elif kind == "score_answer":
+                values[name] = dict(answers[name])
+            elif kind == "noul_answer":
+                values[name] = {"noul": _noul(answers, name)}
             elif kind == "level":
                 low, _, is_int = info
                 values[name] = low + (_top_level(answers[name]) if is_int else float(answers[name]["score"]))
@@ -463,6 +504,7 @@ def _field_spec(name: str, field: Any, strict: bool = True) -> Tuple[str, Any]:
         noul    'bool'    yes/no                     'prob'  float in [0, 1]
         choice  'choice'  {option text: value}
         score   'level'   (low, high, is_int) rating
+        'noul_answer', 'choice_answer', 'score_answer'  the whole answer (Noul, Choice[...], Score[...])
         'skip'  not answerable, left at its default
 
     A required field that is not answerable raises, unless `strict` is False.
@@ -475,6 +517,21 @@ def _field_spec(name: str, field: Any, strict: bool = True) -> Tuple[str, Any]:
 
     if annotation is bool:
         return "bool", None
+    if annotation is Noul:
+        return "noul_answer", None
+    generic = getattr(annotation, "__pydantic_generic_metadata__", None) or {}
+    answer = Choice if annotation is Choice or generic.get("origin") is Choice else None
+    answer = Score if annotation is Score or generic.get("origin") is Score else answer
+    if answer is not None:
+        options = _options(generic["args"][0]) if generic.get("args") else None
+        if options is None or len(options) < 2:
+            raise ValueError(
+                f"Field '{name}' needs its options, two or more: "
+                f'{answer.__name__}[Literal["a", "b"]]' + (", lowest level first." if answer is Score else ".")
+            )
+        if answer is Score and len(options) > _MAX_LEVELS:
+            raise ValueError(f"Field '{name}' has {len(options)} levels; a score takes at most {_MAX_LEVELS}.")
+        return ("choice_answer" if answer is Choice else "score_answer"), options
     options = _options(annotation)
     if options is not None:
         if len(options) < 2:

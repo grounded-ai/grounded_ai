@@ -7,7 +7,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from grounded_ai import AsyncEvaluator, Evaluator
-from grounded_ai.backends.decider import DeciderBackend
+from grounded_ai.backends.decider import Choice, DeciderBackend, Noul, Score
 from grounded_ai.schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 
@@ -534,3 +534,56 @@ class TestGuards:
             async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         )
         assert await backend.evaluate_async(INPUT, output_schema=Out) == Out(quality=4, safe=False)
+
+
+class TestFullAnswers:
+    """Noul, Choice and Score fields hold the decider's whole answer, not just its value."""
+
+    def test_full_answer_fields(self):
+        class Review(BaseModel):
+            risky: Noul = Field(description="Is this a security risk?")
+            severity: Choice[Literal["low", "medium", "high"]]
+            complexity: Score[Literal["trivial", "simple", "moderate", "complex"]]
+
+        seen = []
+        result = auto_backend(seen, p=0.7, pick=2).evaluate(INPUT, output_schema=Review)
+        questions = seen[0]["questions"]
+        assert questions["risky"] == {"type": "noul", "instructions": "Is this a security risk?"}
+        assert questions["severity"] == {
+            "type": "choice", "instructions": "severity", "criteria": {"low": "", "medium": "", "high": ""}}
+        assert questions["complexity"] == {
+            "type": "score", "instructions": "complexity", "criteria": ["trivial", "simple", "moderate", "complex"]}
+
+        assert result.risky.noul == pytest.approx(0.7)
+        assert result.severity.choice == "high"
+        assert result.severity.probabilities == {"low": 0.15, "medium": 0.15, "high": 0.7}
+        assert result.severity.confidence == pytest.approx(0.8)
+        assert result.complexity.score == pytest.approx(2.0)  # level index, as the decider returns it
+        assert result.complexity.probabilities == {"0": 0.1, "1": 0.1, "2": 0.7, "3": 0.1}
+        assert result.complexity.confidence == pytest.approx(0.8)
+
+    def test_choice_values_keep_their_type(self):
+        class Out(BaseModel):
+            stars: Choice[Literal[1, 2, 3]]
+
+        assert auto_backend(pick=1).evaluate(INPUT, output_schema=Out).stars.choice == 2
+
+    def test_full_answers_on_an_evaluation_output_subclass(self):
+        class Detailed(EvaluationOutput):
+            severity: Choice[Literal["low", "high"]]
+
+        result = auto_backend().evaluate(INPUT, output_schema=Detailed)
+        assert (result.label, result.severity.choice) == ("hallucination", "low")
+        assert set(result.severity.probabilities) == {"low", "high"}
+
+    def test_bare_choice_and_score_need_options(self):
+        class NoOptions(BaseModel):
+            severity: Choice
+
+        class NoLevels(BaseModel):
+            complexity: Score
+
+        for schema in (NoOptions, NoLevels):
+            result = auto_backend().evaluate(INPUT, output_schema=schema)
+            assert result.error_code == "INVALID_REQUEST"
+            assert "Literal" in result.message

@@ -237,6 +237,26 @@ class Ticket(BaseModel):
 evaluator.evaluate(response="Charged twice, fix it now.", output_schema=Ticket)
 ```
 
+Those fields hold the value only. To get the model's whole answer, with its probabilities and confidence, type the field as the answer itself:
+
+| Field type | You get |
+| :--- | :--- |
+| `Noul` | `.noul` |
+| `Choice[Literal["a", "b", "c"]]` | `.choice`, `.probabilities`, `.confidence` |
+| `Score[Literal["poor", "ok", "great"]]` (levels, lowest first) | `.score` (level index from 0), `.legend`, `.probabilities`, `.confidence` |
+
+```python
+from grounded_ai.backends.decider import Choice, Noul, Score
+
+class Review(BaseModel):
+    security_risk: Noul
+    severity: Choice[Literal["low", "medium", "high"]]
+    complexity: Score[Literal["trivial", "simple", "moderate", "complex"]]
+
+r = evaluator.evaluate(response=code, output_schema=Review)
+r.severity.choice, r.severity.probabilities, r.severity.confidence
+```
+
 Nothing else maps: a required field of any other type (`str`, lists, nested models) returns an `INVALID_REQUEST` error, and one with a default is left at its default (this is why `reasoning` is always `None`).
 
 The stock `EvaluationOutput` is one `choice` question set by `eval_mode`. Extra fields on a subclass are asked by the table above, in the same request.
