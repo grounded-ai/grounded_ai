@@ -11,6 +11,7 @@ on:
       - "tests/integration/**"
       - "examples/backends/strands_decider.ipynb"
       - ".github/workflows/decider-live.yml"
+      - ".github/scripts/decider_live_report.py"
 
 concurrency:
   group: decider-live-${{ github.ref }}

@@ -188,7 +188,7 @@ print(verdict.probabilities)  # {'hallucination': 0.935, 'faithful': 0.065}
 print(verdict.confidence)     # 0.871
 ```
 
-**The server.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint you named.
+**The server.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. The server's output goes to a log file (pass `verbose=True` to see it). A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint you named.
 
 **The contract.** Every call takes a `DeciderInput`: a `state` (what the model reads) and named `questions` (what it is asked). It returns a `DeciderOutput`: one answer per question. Both sides are fixed classes that mirror the model:
 
@@ -202,7 +202,7 @@ print(verdict.confidence)     # 0.871
 from grounded_ai.backends.decider import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
 result = evaluator.evaluate(DeciderInput(
-    state="You have charged me twice and my account is now overdrawn. Fix it today.",
+    state="You have charged me twice and my account is now overdrawn. I need this reversed today.",
     questions={
         "urgent": NoulQuestion(instructions="This needs a reply within the hour."),
         "area": ChoiceQuestion(
@@ -215,9 +215,9 @@ result = evaluator.evaluate(DeciderInput(
         ),
     },
 ))
-result.answers["urgent"].noul          # 0.91
+result.answers["urgent"].noul          # 0.5887
 result.answers["area"].choice          # 'billing'
-result.answers["clarity"].score        # 1.8
+result.answers["clarity"].score        # 1.3147 (between "partly clear" and "clear")
 ```
 
 The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they refer to "the response", "the context" and "the query", so name those in your state. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.

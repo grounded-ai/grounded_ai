@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import warnings
 from typing import Any, Dict, List, Literal, Optional, Type, Union
@@ -258,6 +259,7 @@ class DeciderBackend(BaseEvaluator):
         checkpoint: str = None,
         device: str = None,
         timeout: float = 600.0,
+        verbose: bool = False,
     ) -> "DeciderBackend":
         """
         Start `strands-decider serve` on `port` and wait until it is ready, so the evaluator
@@ -272,6 +274,8 @@ class DeciderBackend(BaseEvaluator):
                 `model_name`, so use the full repo id there: "decider/StrandsAgents/<name>".
             device: Torch device (cuda, mps or cpu). Auto-detected by the server when omitted.
             timeout: Seconds to wait for the server; the first start downloads the checkpoint.
+            verbose: Show the server's own output. By default it goes to a log file, and the
+                end of that log is included in the error if the server fails to start.
         """
         self.base_url = f"http://127.0.0.1:{port}"
         self._model_checked = False
@@ -287,19 +291,27 @@ class DeciderBackend(BaseEvaluator):
         command = [executable, "serve", checkpoint or self.model_name, "--port", str(port)]
         if device:
             command += ["--device", device]
-        self._server = subprocess.Popen(command)
+        log = None if verbose else tempfile.NamedTemporaryFile(prefix="strands-decider-", suffix=".log", delete=False)
+        self._server = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT if log else None)
         atexit.register(self.shutdown)
+
+        def failure(message: str) -> str:
+            if log is None:
+                return message
+            log.flush()
+            tail = "".join(open(log.name, errors="replace").readlines()[-15:]).strip()
+            return f"{message} Server log ({log.name}):\n{tail}" if tail else message
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._server.poll() is not None:
                 code, self._server = self._server.returncode, None
-                raise RuntimeError(f"`{' '.join(command)}` exited with code {code} before it was ready.")
+                raise RuntimeError(failure(f"`{' '.join(command)}` exited with code {code} before it was ready."))
             if self._healthy():
                 return self
             time.sleep(1.0)
         self.shutdown()
-        raise TimeoutError(f"The strands-decider server was not ready on port {port} after {timeout:.0f}s.")
+        raise TimeoutError(failure(f"The strands-decider server was not ready on port {port} after {timeout:.0f}s."))
 
     def shutdown(self) -> None:
         """Stop the server that warmup() started. Does nothing if warmup() did not start one."""

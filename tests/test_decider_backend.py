@@ -406,7 +406,7 @@ class TestWarmup:
 
         up, started = set(), []
 
-        def popen(command):
+        def popen(command, **kwargs):
             started.append(FakeServer(command))
             up.add(8123)  # ready by the next health check
             return started[-1]
@@ -428,7 +428,7 @@ class TestWarmup:
     def test_reuses_a_server_already_on_the_port(self, monkeypatch):
         import grounded_ai.backends.decider as decider
 
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda command: pytest.fail("should not start a server"))
+        monkeypatch.setattr(decider.subprocess, "Popen", lambda command, **kw: pytest.fail("should not start a server"))
         backend = self._backend({8000})
         backend.warmup(port=8000)
         assert backend.base_url == "http://127.0.0.1:8000"
@@ -438,18 +438,41 @@ class TestWarmup:
 
         up, started = set(), []
         monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda c: (started.append(c), up.add(8000), FakeServer(c))[2])
+        monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(c), up.add(8000), FakeServer(c))[2])
         monkeypatch.setattr(decider.time, "sleep", lambda s: None)
         self._backend(up, model_name=MODEL).warmup(checkpoint="/models/hobson")
         assert started[0][:3] == ["strands-decider", "serve", "/models/hobson"]
 
-    def test_server_that_exits_is_reported(self, monkeypatch):
+    def test_server_that_exits_is_reported_with_its_log(self, monkeypatch):
         import grounded_ai.backends.decider as decider
 
+        def popen(command, stdout=None, **kwargs):
+            stdout.write(b"OSError: checkpoint not found\n")  # what the server printed before dying
+            return FakeServer(command, exits_with=1)
+
         monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda command: FakeServer(command, exits_with=1))
-        with pytest.raises(RuntimeError, match="exited with code 1"):
+        monkeypatch.setattr(decider.subprocess, "Popen", popen)
+        with pytest.raises(RuntimeError, match="exited with code 1(.|\n)*checkpoint not found"):
             self._backend(set()).warmup(port=8000)
+
+    def test_server_output_is_kept_out_of_the_way_unless_verbose(self, monkeypatch):
+        import grounded_ai.backends.decider as decider
+
+        up, seen = set(), []
+
+        def popen(command, **kwargs):
+            seen.append(kwargs)
+            up.add(8000)
+            return FakeServer(command)
+
+        monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
+        monkeypatch.setattr(decider.subprocess, "Popen", popen)
+        monkeypatch.setattr(decider.time, "sleep", lambda s: None)
+        self._backend(up).warmup(port=8000)
+        up.clear()
+        self._backend(up).warmup(port=8000, verbose=True)
+        assert seen[0]["stdout"] is not None and seen[0]["stderr"] is decider.subprocess.STDOUT
+        assert seen[1] == {"stdout": None, "stderr": None}
 
     def test_missing_server_package(self, monkeypatch):
         import grounded_ai.backends.decider as decider
@@ -463,7 +486,7 @@ class TestWarmup:
 
         started = []
         monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda c: (started.append(FakeServer(c)), started[-1])[1])
+        monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(FakeServer(c)), started[-1])[1])
         monkeypatch.setattr(decider.time, "sleep", lambda s: None)
         with pytest.raises(TimeoutError):
             self._backend(set()).warmup(port=8000, timeout=0.05)
