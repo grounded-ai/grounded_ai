@@ -19,8 +19,8 @@ class TestAnthropicBackend:
         """Mocks the Anthropic client and messages.create method."""
         client = MagicMock()
         mock_response = MagicMock()
-        # Mock the beta path: client.beta.messages.create
-        client.beta.messages.create.return_value = mock_response
+        # client.messages.create (structured outputs are GA)
+        client.messages.create.return_value = mock_response
         return client
 
     def test_factory_routing(self):
@@ -43,7 +43,7 @@ class TestAnthropicBackend:
             }
         )
 
-        mock_client.beta.messages.create.return_value.content = [mock_content]
+        mock_client.messages.create.return_value.content = [mock_content]
 
         backend = AnthropicBackend(model_name="claude-3", client=mock_client)
 
@@ -60,18 +60,15 @@ class TestAnthropicBackend:
         assert result.score == 0.85
         assert result.label == "faithful"
 
-        # 2. Assert Message Creation Call (Beta Check)
-        args, kwargs = mock_client.beta.messages.create.call_args
+        # 2. Assert Message Creation Call (GA structured outputs: no beta header)
+        args, kwargs = mock_client.messages.create.call_args
+        assert "betas" not in kwargs
 
-        # Check Beta Header
-        assert "betas" in kwargs
-        assert "structured-outputs-2025-11-13" in kwargs["betas"]
-        
         # Check Default max_tokens
         assert kwargs["max_tokens"] == 1024
 
         # Check Schema Patching in output_format
-        output_format = kwargs["output_format"]
+        output_format = kwargs["output_config"]["format"]
         assert output_format["type"] == "json_schema"
         schema = output_format["schema"]
 
@@ -95,7 +92,7 @@ class TestAnthropicBackend:
         # Setup mock to raise exception
         mock_err = Exception("Credit limit reached")
         mock_err.status_code = 402  # Fake status code
-        mock_client.beta.messages.create.side_effect = mock_err
+        mock_client.messages.create.side_effect = mock_err
 
         backend = AnthropicBackend(model_name="claude-3", client=mock_client)
 
@@ -110,7 +107,7 @@ class TestAnthropicBackend:
         mock_content.text = json.dumps(
             {"score": 0.5, "label": "ok", "confidence": 1.0, "reasoning": "ok"}
         )
-        mock_client.beta.messages.create.return_value.content = [mock_content]
+        mock_client.messages.create.return_value.content = [mock_content]
 
         # Initialize with custom system prompt
         backend = AnthropicBackend(
@@ -121,7 +118,7 @@ class TestAnthropicBackend:
 
         backend.evaluate(EvaluationInput(response="code"))
 
-        args, kwargs = mock_client.beta.messages.create.call_args
+        args, kwargs = mock_client.messages.create.call_args
         assert kwargs["system"] == "You are a strict code reviewer."
 
     def test_custom_input_output_schemas(self, mock_client):
@@ -138,7 +135,7 @@ class TestAnthropicBackend:
         # Mock response
         mock_content = MagicMock()
         mock_content.text = json.dumps({"is_safe": False, "bugs": 3})
-        mock_client.beta.messages.create.return_value.content = [mock_content]
+        mock_client.messages.create.return_value.content = [mock_content]
 
         backend = AnthropicBackend(model_name="claude-3", client=mock_client)
 
@@ -150,6 +147,21 @@ class TestAnthropicBackend:
         assert result.bugs == 3
 
         # Verify schema generation
-        args, kwargs = mock_client.beta.messages.create.call_args
-        schema = kwargs["output_format"]["schema"]
+        args, kwargs = mock_client.messages.create.call_args
+        schema = kwargs["output_config"]["format"]["schema"]
         assert "bugs" in schema["properties"]
+
+
+def test_sampling_args_travel_in_extra_body():
+    """anthropic 1.x removed temperature/top_p/top_k from the SDK signatures (not from the API):
+    a user's temperature=0 must still reach the request instead of raising TypeError."""
+    client = MagicMock()
+    content = MagicMock()
+    content.text = json.dumps({"score": 0.5, "label": "x", "confidence": 0.5})
+    client.messages.create.return_value.content = [content]
+    backend = AnthropicBackend(model_name="claude-haiku-4-5", client=client, top_k=5)
+    backend.evaluate(EvaluationInput(response="r"), temperature=0.0, max_tokens=300)
+    _, kwargs = client.messages.create.call_args
+    assert "temperature" not in kwargs and "top_k" not in kwargs
+    assert kwargs["extra_body"] == {"temperature": 0.0, "top_k": 5}
+    assert kwargs["max_tokens"] == 300

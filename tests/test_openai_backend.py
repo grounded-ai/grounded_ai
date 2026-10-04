@@ -20,12 +20,12 @@ from grounded_ai.schemas import (  # noqa: E402
 class TestOpenAIBackend:
     @pytest.fixture
     def mock_client(self):
-        """Mocks the OpenAI client and the beta.chat.completions.parse method."""
+        """Mocks the OpenAI client and the chat.completions.parse method."""
         client = MagicMock()
         mock_completion = MagicMock()
 
-        # Setup the chain: client.beta.chat.completions.parse(...)
-        client.beta.chat.completions.parse.return_value = mock_completion
+        # Setup the chain: client.chat.completions.parse(...)
+        client.chat.completions.parse.return_value = mock_completion
 
         return client
 
@@ -49,7 +49,7 @@ class TestOpenAIBackend:
         )
 
         # Connect message to completion.choices[0]
-        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion = mock_client.chat.completions.parse.return_value
         mock_completion.choices = [MagicMock(message=mock_message)]
 
         # Initialize backend directly with injected client
@@ -71,7 +71,7 @@ class TestOpenAIBackend:
 
         # Verify call arguments
         # We expect messages to be constructed from inputs
-        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        args, kwargs = mock_client.chat.completions.parse.call_args
         assert kwargs["model"] == "gpt-4o"
         assert kwargs["response_format"] == EvaluationOutput
         assert len(kwargs["messages"]) == 2  # System + User
@@ -83,7 +83,7 @@ class TestOpenAIBackend:
         mock_message.refusal = "I cannot evaluate this content due to safety policies."
         mock_message.parsed = None
 
-        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion = mock_client.chat.completions.parse.return_value
         mock_completion.choices = [MagicMock(message=mock_message)]
 
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
@@ -103,7 +103,7 @@ class TestOpenAIBackend:
             score=0.1, label="ok", confidence=1.0, reasoning="ok"
         )
 
-        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion = mock_client.chat.completions.parse.return_value
         mock_completion.choices = [MagicMock(message=mock_message)]
 
         backend = OpenAIBackend(
@@ -114,7 +114,7 @@ class TestOpenAIBackend:
 
         backend.evaluate(EvaluationInput(response="rose is red"))
 
-        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        args, kwargs = mock_client.chat.completions.parse.call_args
         messages = kwargs["messages"]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == "You are a poetic evaluator."
@@ -135,7 +135,7 @@ class TestOpenAIBackend:
         mock_message.refusal = None
         mock_message.parsed = CustomOutput(sentiment_score=0.9, is_positive=True)
 
-        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion = mock_client.chat.completions.parse.return_value
         mock_completion.choices = [MagicMock(message=mock_message)]
 
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
@@ -150,7 +150,7 @@ class TestOpenAIBackend:
         assert result.is_positive is True
 
         # Verify passed to API
-        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        args, kwargs = mock_client.chat.completions.parse.call_args
         assert kwargs["response_format"] == CustomOutput
         # OpenAI backend calls .model_dump() on custom inputs if they lack formatted_prompt
         messages = kwargs["messages"]
@@ -164,7 +164,7 @@ class TestOpenAIBackend:
             score=0.5, label="ok", confidence=1.0, reasoning="ok"
         )
 
-        mock_completion = mock_client.beta.chat.completions.parse.return_value
+        mock_completion = mock_client.chat.completions.parse.return_value
         mock_completion.choices = [MagicMock(message=mock_message)]
 
         backend = OpenAIBackend(model_name="gpt-4o", client=mock_client)
@@ -172,5 +172,5 @@ class TestOpenAIBackend:
         # Override temperature in evaluate call
         backend.evaluate(EvaluationInput(response="test"), temperature=0.7)
 
-        args, kwargs = mock_client.beta.chat.completions.parse.call_args
+        args, kwargs = mock_client.chat.completions.parse.call_args
         assert kwargs["temperature"] == 0.7

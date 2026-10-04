@@ -8,7 +8,7 @@ as used by LogFire and other OTel-compatible platforms.
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 # === Message Format (GenAI Semantic Convention) ===
 
@@ -135,8 +135,7 @@ class GenAISpan(BaseModel):
         default_factory=dict, description="Additional span attributes"
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
     @computed_field
     @property

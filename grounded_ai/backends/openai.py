@@ -15,7 +15,7 @@ except ImportError:
 
 class OpenAIBackend(BaseEvaluator):
     """
-    OpenAI backend using the Structured Outputs (beta.chat.completions.parse) implementation.
+    OpenAI backend using the Structured Outputs (chat.completions.parse) implementation.
     """
 
     def __init__(
@@ -76,7 +76,7 @@ class OpenAIBackend(BaseEvaluator):
 
         try:
             # Call OpenAI with Structured Outputs
-            completion = self.client.beta.chat.completions.parse(
+            completion = self.client.chat.completions.parse(
                 model=self.model_name,
                 messages=messages,
                 response_format=output_schema,
@@ -131,7 +131,7 @@ class OpenAIBackend(BaseEvaluator):
         request_kwargs = {**self.kwargs, **kwargs}
 
         try:
-            completion = await self.async_client.beta.chat.completions.parse(
+            completion = await self.async_client.chat.completions.parse(
                 model=self.model_name,
                 messages=messages,
                 response_format=output_schema,
