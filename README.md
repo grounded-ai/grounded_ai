@@ -266,6 +266,42 @@ The server truncates input that overflows the model's window from the end, witho
 
 On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).
 
+### 8. Two-Stage Evaluation (Decider first, LLM judge for the rest)
+`CascadeEvaluator` asks the Decider every question in one cheap local request. Any answer below `min_confidence` is escalated: the original state and only those leftover questions go to an LLM judge in one call. Confident answers come back exactly as the Decider gave them; escalated ones come back as a `JudgedAnswer` with the judge's pick and reasoning, and no probabilities, because an LLM does not measure any.
+
+```python
+from grounded_ai import CascadeEvaluator
+from grounded_ai.backends.decider import HALLUCINATION, ChoiceQuestion, DeciderInput
+
+cascade = CascadeEvaluator(
+    decider="decider/StrandsAgents/strands-decider-2B-hobson-v19",
+    judge="anthropic/claude-haiku-4-5-20251001",   # any Evaluator model string, or an Evaluator
+    min_confidence=0.9,
+)
+cascade.decider.warmup(port=8000)
+
+result = cascade.evaluate(DeciderInput(
+    state={"context": "Michael Collins remained in orbit in the Command Module while Armstrong and Aldrin walked on the Moon.",
+           "response": "Buzz Aldrin stayed in the orbiter while Neil went down alone."},
+    questions={
+        "verdict": HALLUCINATION,
+        "language": ChoiceQuestion(instructions="Which language is the response in?",
+                                   criteria={"english": "written in English", "french": "written in French"}),
+    },
+))
+result.escalated                    # ['verdict']: the Decider said hallucination, but at confidence 0.73
+result.answers["language"].choice   # 'english', the Decider's own answer at confidence 0.93
+result.answers["verdict"].answer    # 'hallucination', from the judge, with .reasoning
+result.decider                      # the Decider's full answers, escalated ones included
+```
+
+- **What counts as unsure.** A choice or score answer uses its `confidence`. A yes/no answer has no confidence field because its probability is the uncertainty, so it is read as `|2p - 1|`.
+- **Why 0.9.** It is the top band of the Decider's own routing convention: on held-out short classification its answers at 0.9 or above were right about 95% of the time, against about 66% from 0.5 to 0.9. On long documents the model is under-confident, so 0.9 escalates more than it needs to there. Measure on your own traffic.
+- **What the judge receives.** A `DeciderLeftover`, a custom evaluation input holding the state and the leftover questions with their options. Its answers are restricted to each question's own options or levels.
+- **Failures.** If the Decider fails, you get its `EvaluationError`. If the judge fails, you still get every answer, with the escalated ones left as the Decider gave them and the error in `result.judge_error`.
+
+`evaluate_async()` does the same with the backends' async clients.
+
 ## Implementation Status
 
 | Backend | Status | Description |

@@ -18,6 +18,35 @@ from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
 _INPUT_FIELDS = {"response", "query", "context", "base_template"}
 
 
+def prepare_input(
+    backend: BaseEvaluator, input_data: Union[BaseModel, Dict[str, Any], str, None], kwargs: Dict[str, Any]
+):
+    """
+    Normalize input_data into the backend's input model.
+    Splits kwargs into input-construction fields and backend runtime args.
+    Returns (input_data, backend_kwargs).
+    """
+    # A backend with its own input class (the Decider backend's DeciderInput) names the field
+    # a bare string goes into; every other backend takes the stock EvaluationInput.
+    primary = getattr(backend, "primary_input_field", None)
+    if primary:
+        schema, fields = backend.input_schema, set(backend.input_schema.model_fields)
+    else:
+        schema, fields, primary = EvaluationInput, _INPUT_FIELDS, "response"
+    input_kwargs = {k: v for k, v in kwargs.items() if k in fields}
+    backend_kwargs = {k: v for k, v in kwargs.items() if k not in fields}
+
+    if isinstance(input_data, GenAIConversation):
+        other = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS and k != primary}
+        input_data = schema(**{primary: input_data.to_evaluation_string()}, **other)
+    elif isinstance(input_data, str):
+        input_data = schema(**{primary: input_data}, **input_kwargs)
+    elif input_data is None:
+        input_data = schema(**input_kwargs)
+
+    return input_data, backend_kwargs
+
+
 class Evaluator:
     """
     Main entry point for Grounded AI evaluation.
@@ -73,30 +102,8 @@ class Evaluator:
     def _prepare_input(
         self, input_data: Union[BaseModel, Dict[str, Any], str, None], kwargs: Dict[str, Any]
     ):
-        """
-        Normalize input_data into an EvaluationInput (or BaseModel subclass).
-        Splits kwargs into input-construction fields and backend runtime args.
-        Returns (input_data, backend_kwargs).
-        """
-        # A backend with its own input class (the Decider backend's DeciderInput) names the field
-        # a bare string goes into; every other backend takes the stock EvaluationInput.
-        primary = getattr(self.backend, "primary_input_field", None)
-        if primary:
-            schema, fields = self.backend.input_schema, set(self.backend.input_schema.model_fields)
-        else:
-            schema, fields, primary = EvaluationInput, _INPUT_FIELDS, "response"
-        input_kwargs = {k: v for k, v in kwargs.items() if k in fields}
-        backend_kwargs = {k: v for k, v in kwargs.items() if k not in fields}
-
-        if isinstance(input_data, GenAIConversation):
-            other = {k: v for k, v in input_kwargs.items() if k not in _INPUT_FIELDS and k != primary}
-            input_data = schema(**{primary: input_data.to_evaluation_string()}, **other)
-        elif isinstance(input_data, str):
-            input_data = schema(**{primary: input_data}, **input_kwargs)
-        elif input_data is None:
-            input_data = schema(**input_kwargs)
-
-        return input_data, backend_kwargs
+        """Normalize input_data for this evaluator's backend. Returns (input_data, backend_kwargs)."""
+        return prepare_input(self.backend, input_data, kwargs)
 
     def evaluate(
         self,
@@ -148,9 +155,12 @@ class AsyncEvaluator(Evaluator):
         return await self.backend.evaluate_async(input_data, output_schema=output_schema, **backend_kwargs)
 
 
+from .cascade import CascadeEvaluator  # noqa: E402  (needs Evaluator and prepare_input above)
+
 __all__ = [
     "Evaluator",
     "AsyncEvaluator",
+    "CascadeEvaluator",
     "EvaluationInput",
     "EvaluationOutput",
     "EvaluationError",
