@@ -18,7 +18,7 @@ from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
 _INPUT_FIELDS = {"response", "query", "context", "base_template"}
 
 
-def prepare_input(
+def _prepare_input(
     backend: BaseEvaluator, input_data: Union[BaseModel, Dict[str, Any], str, None], kwargs: Dict[str, Any]
 ):
     """
@@ -103,7 +103,7 @@ class Evaluator:
         self, input_data: Union[BaseModel, Dict[str, Any], str, None], kwargs: Dict[str, Any]
     ):
         """Normalize input_data for this evaluator's backend. Returns (input_data, backend_kwargs)."""
-        return prepare_input(self.backend, input_data, kwargs)
+        return _prepare_input(self.backend, input_data, kwargs)
 
     def evaluate(
         self,
@@ -155,7 +155,15 @@ class AsyncEvaluator(Evaluator):
         return await self.backend.evaluate_async(input_data, output_schema=output_schema, **backend_kwargs)
 
 
-from .cascade import CascadeEvaluator  # noqa: E402  (needs Evaluator and prepare_input above)
+def __getattr__(name: str):
+    # CascadeEvaluator is imported on first use, so `import grounded_ai` does not load the Decider
+    # backend (see "Lazy backend imports" in CLAUDE.md).
+    if name == "CascadeEvaluator":
+        from .cascade import CascadeEvaluator
+
+        return CascadeEvaluator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Evaluator",

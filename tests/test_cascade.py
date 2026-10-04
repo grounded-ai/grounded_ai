@@ -23,7 +23,7 @@ from grounded_ai.backends.decider import (
 )
 from grounded_ai.base import BaseEvaluator
 from grounded_ai.cascade import CascadeOutput, DeciderLeftover, JudgedAnswer
-from grounded_ai.schemas import EvaluationError
+from grounded_ai.schemas import EvaluationError, EvaluationOutput
 
 MODEL = "strands-decider-2B-hobson-v19"
 
@@ -192,6 +192,91 @@ class TestWhatTheJudgeReceives:
         cascade({"area": UNSURE["area"]}, judge).evaluate(Ticket(customer="Ada", body="Charged twice.", questions={"area": AREA}))
         (input_data, _), = judge.calls
         assert input_data.state == {"customer": "Ada", "body": "Charged twice."}
+
+
+class TestReviewFixes:
+    def test_importing_the_package_does_not_load_the_decider_backend(self):
+        import subprocess
+        import sys
+
+        code = "import sys, grounded_ai; print('grounded_ai.backends.decider' in sys.modules)"
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
+        assert out == "False"
+        from grounded_ai import CascadeEvaluator as again  # still importable from the package
+        assert again is CascadeEvaluator
+
+    def test_escalated_follows_the_order_the_questions_were_asked(self):
+        def handler(request):
+            if request.url.path == "/health":
+                return httpx.Response(404)
+            body = json.loads(request.content)
+            reply = {k: UNSURE[k] for k in reversed(list(body["questions"]))}  # server answers in another order
+            return httpx.Response(200, json={"answers": reply})
+
+        backend = DeciderBackend(model_name=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        judge = FakeJudge({"area": "billing", "urgent": True, "clarity": "clear"})
+        result = CascadeEvaluator(decider=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
+        assert result.escalated == ["area", "urgent", "clarity"]
+
+    def test_judged_lists_what_the_judge_actually_answered(self):
+        answers = {"area": UNSURE["area"], "urgent": CONFIDENT["urgent"]}
+        ok = cascade(answers, FakeJudge({"area": "billing"})).evaluate(ask(area=AREA, urgent=URGENT))
+        assert (ok.escalated, ok.judged) == (["area"], ["area"])
+        failed = cascade(answers, FakeJudge(error=EvaluationError(error_code="500", message="x"))).evaluate(
+            ask(area=AREA, urgent=URGENT))
+        assert (failed.escalated, failed.judged) == (["area"], [])
+
+    def test_a_judge_that_raises_keeps_the_decider_answers(self):
+        class Raising(FakeJudge):
+            def _call_backend(self, input_data, output_schema, **kwargs):
+                raise RuntimeError("CUDA out of memory")
+
+        result = cascade({"area": UNSURE["area"]}, Raising()).evaluate(ask(area=AREA))
+        assert isinstance(result, CascadeOutput)
+        assert result.answers["area"] == ChoiceAnswer(**UNSURE["area"])
+        assert result.judge_error.error_code == "JUDGE_ERROR"
+        assert "CUDA out of memory" in result.judge_error.message
+
+    def test_a_judge_that_ignores_the_schema_is_a_judge_error(self):
+        class WrongShape(FakeJudge):
+            def _call_backend(self, input_data, output_schema, **kwargs):
+                return EvaluationOutput(score=1.0, label="x", confidence=1.0)
+
+        result = cascade({"area": UNSURE["area"]}, WrongShape()).evaluate(ask(area=AREA))
+        assert result.judge_error.error_code == "JUDGE_ERROR"
+        assert result.judged == []
+
+    def test_judges_that_cannot_honour_an_output_schema_are_refused(self):
+        with pytest.raises(TypeError, match="judge"):
+            CascadeEvaluator(decider=decider(CONFIDENT), judge=decider(CONFIDENT))
+
+        class GroundedAISLMBackend(FakeJudge):  # stands in for the SLM backend without loading torch
+            pass
+
+        with pytest.raises(TypeError, match="judge"):
+            CascadeEvaluator(decider=decider(CONFIDENT), judge=GroundedAISLMBackend())
+
+        class HuggingFaceBackend(FakeJudge):
+            task = "text-classification"
+
+        with pytest.raises(TypeError, match="judge"):
+            CascadeEvaluator(decider=decider(CONFIDENT), judge=HuggingFaceBackend())
+
+    def test_always_escalate_sends_a_question_type_to_the_judge_regardless_of_confidence(self):
+        """Score questions behind a confidence gate are not reliable on tasks the Decider never saw."""
+        judge = FakeJudge({"clarity": "clear"})
+        result = cascade(CONFIDENT, judge, always_escalate={"score"}).evaluate(ask(area=AREA, clarity=CLARITY))
+        assert result.escalated == ["clarity"]
+        with pytest.raises(ValueError):
+            cascade(CONFIDENT, always_escalate={"essay"})
+
+    def test_object_instructions_keep_their_key_order_in_the_prompt(self):
+        question = NoulQuestion(instructions={"rule": "ports must be 443", "claim": "it listens on 8080"})
+        prompt = DeciderLeftover(state="x", questions={"q": question}).formatted_prompt
+        assert prompt.index("ports must be 443") < prompt.index("it listens on 8080")
+
+    def test_leftover_has_only_what_the_judge_needs(self):
+        assert set(DeciderLeftover.model_fields) == {"state", "questions"}
 
 
 class TestFailures:

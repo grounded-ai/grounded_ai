@@ -49,7 +49,7 @@ def test_confident_questions_stay_local_and_unsure_ones_are_judged(cascade):
             "response": "Buzz Aldrin stayed in the orbiter while Neil went down alone.",
         },
         questions={
-            # The real model answers this correctly but at low confidence (about 0.32): it should escalate.
+            # The real model answers this correctly but at confidence 0.73: below 0.9, so it should escalate.
             "verdict": HALLUCINATION,
             # An easy one the model is sure of: it should stay local.
             "english": ChoiceQuestion(instructions="Which language is the response in?",

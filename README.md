@@ -290,15 +290,18 @@ result = cascade.evaluate(DeciderInput(
     },
 ))
 result.escalated                    # ['verdict']: the Decider said hallucination, but at confidence 0.73
+result.judged                       # ['verdict']: what the judge actually answered
 result.answers["language"].choice   # 'english', the Decider's own answer at confidence 0.93
 result.answers["verdict"].answer    # 'hallucination', from the judge, with .reasoning
 result.decider                      # the Decider's full answers, escalated ones included
 ```
 
-- **What counts as unsure.** A choice or score answer uses its `confidence`. A yes/no answer has no confidence field because its probability is the uncertainty, so it is read as `|2p - 1|`.
-- **Why 0.9.** It is the top band of the Decider's own routing convention: on held-out short classification its answers at 0.9 or above were right about 95% of the time, against about 66% from 0.5 to 0.9. On long documents the model is under-confident, so 0.9 escalates more than it needs to there. Measure on your own traffic.
+- **What counts as unsure.** A choice or score answer uses its `confidence`. A yes/no answer has no confidence field because its probability is the uncertainty, so it is read as `|2p - 1|`, the same formula as a two-option choice.
+- **Why 0.9.** It is the top band of the Decider's own routing convention: on held-out short classification its answers at 0.9 or above were right about 95% of the time, against about 66% from 0.5 to 0.9. Those bands were measured on classification; on long documents the model is under-confident, so 0.9 escalates more than it needs to there. Measure on your own traffic.
+- **Score questions.** The Decider's authors report that on tasks it never trained on, a confidence gate works for choice questions and not for score questions. `always_escalate={"score"}` sends every score question to the judge.
 - **What the judge receives.** A `DeciderLeftover`, a custom evaluation input holding the state and the leftover questions with their options. Its answers are restricted to each question's own options or levels.
-- **Failures.** If the Decider fails, you get its `EvaluationError`. If the judge fails, you still get every answer, with the escalated ones left as the Decider gave them and the error in `result.judge_error`.
+- **Failures.** If the Decider fails, you get its `EvaluationError`. If the judge fails (an error, an exception, or an answer that doesn't fit the schema), you still get every answer: the escalated ones stay as the Decider gave them, `result.judged` is empty, and the error is in `result.judge_error`.
+- **Which judges work.** Any backend that fills a custom output schema: `openai/`, `anthropic/`, `bedrock/`, or `hf/` with `task="text-generation"`. The SLM backend, Hugging Face text-classification and a second Decider are refused at construction.
 
 `evaluate_async()` does the same with the backends' async clients.
 
