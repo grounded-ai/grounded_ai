@@ -113,11 +113,16 @@ TOXICITY = ChoiceQuestion(
         "non-toxic": "the response is civil",
     },
 )
+# Retrieval relevance: does the retrieved context (a chunk or document) contain information that
+# can answer the query? It judges what was retrieved, not a generated answer, and matches the SLM
+# backend's definition. Chunks on the query's topic that do not hold the answer count as unrelated;
+# a broader "does the context help" wording called those relevant (8/12 vs 25/25 on the labelled
+# cases in tests/integration/test_decider_live.py).
 RAG_RELEVANCE = ChoiceQuestion(
-    instructions="Does the response help answer the query?",
+    instructions="Does the context contain information that can answer the query?",
     criteria={
-        "relevant": "the response addresses what the query asks",
-        "unrelated": "the response is about something else",
+        "relevant": "the context contains information that answers the query",
+        "unrelated": "the context lacks the information the query asks for",
     },
 )
 
