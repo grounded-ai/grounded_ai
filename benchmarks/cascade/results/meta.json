@@ -1,0 +1,9 @@
+{
+  "checkpoint": "StrandsAgents/strands-decider-2B-hobson-v19",
+  "judge": "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+  "device": "mps",
+  "per_task": 200,
+  "seed": 7,
+  "price_in": 1.0,
+  "price_out": 5.0
+}
