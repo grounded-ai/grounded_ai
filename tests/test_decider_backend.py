@@ -116,7 +116,7 @@ class TestContract:
         result = make_backend().evaluate(DeciderInput(state="x", questions={"verdict": question}))
         assert set(result.answers["verdict"].probabilities) == labels
 
-    def test_rag_relevance_judges_a_retrieved_chunk_against_the_question(self):
+    def test_rag_relevance_judges_a_retrieved_chunk_against_the_query(self):
         """RAG relevance is about retrieval: is the retrieved context relevant to the query?
         It is not about whether a generated response answers the query."""
         text = " ".join([str(RAG_RELEVANCE.instructions), *RAG_RELEVANCE.criteria.values()]).lower()

@@ -115,9 +115,8 @@ TOXICITY = ChoiceQuestion(
 )
 # Retrieval relevance: does the retrieved context (a chunk or document) contain information that
 # can answer the query? It judges what was retrieved, not a generated answer, and matches the SLM
-# backend's definition. Chunks on the query's topic that do not hold the answer count as unrelated;
-# a broader "does the context help" wording called those relevant (8/12 vs 25/25 on the labelled
-# cases in tests/integration/test_decider_live.py).
+# backend's definition. A chunk on the query's topic that does not hold the answer is unrelated;
+# the labelled cases in tests/integration/test_decider_live.py pin that down.
 RAG_RELEVANCE = ChoiceQuestion(
     instructions="Does the context contain information that can answer the query?",
     criteria={
@@ -379,7 +378,7 @@ class DeciderBackend(BaseEvaluator):
 
     def _warn_if_long(self, state: Content) -> None:
         """The server cuts a state that overflows the model's window from the end, without an
-        error, so the last field (the response being judged) is what goes missing. There is no
+        error, so the last field is what goes missing. There is no
         tokenizer here, so this is a rough guard: over ~4 characters per token of window."""
         if not self._max_length:
             return
@@ -387,8 +386,8 @@ class DeciderBackend(BaseEvaluator):
         if chars > 4 * self._max_length:
             warnings.warn(
                 f"Decider input is about {chars} characters but the served model reads at most "
-                f"{self._max_length} tokens; the server truncates the end of the input, so the text "
-                "being judged may be cut off. Shorten the context.",
+                f"{self._max_length} tokens; the server truncates the end of the input, so whatever comes "
+                "last in the state may be cut off. Shorten the input.",
                 stacklevel=2,
             )
 
