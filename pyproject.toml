@@ -57,6 +57,9 @@ decider = [
   "strands-decider; python_version >= '3.10'",
 ]
 
+[project.scripts]
+grounded-ai = "grounded_ai.cli:entrypoint"
+
 [project.urls]
 "Homepage" = "https://github.com/grounded-ai/grounded_ai"
 "Bug Tracker" = "https://github.com/grounded-ai/grounded_ai/issues"
