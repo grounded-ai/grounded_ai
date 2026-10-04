@@ -15,6 +15,7 @@ Command line: a faithfulness check, and the same check as a Stop hook for coding
 
 MODEL is any Evaluator model string: "anthropic/...", "openai/...", "bedrock/...", "hf/...", or
 "decider/..." (a running strands-decider server; set DECIDER_BASE_URL or --base-url).
+The grounded-ai/ SLM and hf/ text-classification models answer in fixed formats and cannot be used.
 """
 
 import argparse
@@ -23,9 +24,9 @@ import sys
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, List, Literal, Optional, TextIO
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
-from .schemas import EvaluationError
+from .schemas import EvaluationError, EvaluationInput
 
 SYSTEM_PROMPT = (
     "You check whether an AI assistant's answer is supported by the evidence it was given. "
@@ -39,10 +40,8 @@ DEFAULT_MAX_CONTEXT_CHARS = 20000
 class Verdict:
     faithful: bool
     model: str
-    score: Optional[float] = (
-        None  # probability the answer is not supported, when the model measures one
-    )
-    reasoning: Optional[str] = None
+    hallucination_probability: Optional[float] = None  # decider/ models only
+    reasoning: Optional[str] = None  # LLM judges only
 
 
 @dataclass
@@ -54,22 +53,24 @@ class Turn:
     answer: Optional[str] = None
 
 
-class FaithfulnessInput(BaseModel):
+class FaithfulnessInput(EvaluationInput):
     """What an LLM judge reads: the evidence, the question, and the answer to check."""
 
     context: str
-    query: Optional[str] = None
     response: str
+    base_template: str = """<evidence>
+{{ context }}
+</evidence>
+{% if query %}
+<question>
+{{ query }}
+</question>
+{% endif %}
+<answer>
+{{ response }}
+</answer>
 
-    @computed_field
-    @property
-    def formatted_prompt(self) -> str:
-        parts = [f"<evidence>\n{self.context}\n</evidence>"]
-        if self.query:
-            parts.append(f"<question>\n{self.query}\n</question>")
-        parts.append(f"<answer>\n{self.response}\n</answer>")
-        parts.append("Is every factual claim in the answer supported by the evidence?")
-        return "\n\n".join(parts)
+Is every factual claim in the answer supported by the evidence?"""
 
 
 class FaithfulnessJudgement(BaseModel):
@@ -81,6 +82,9 @@ class FaithfulnessJudgement(BaseModel):
 
 # --- the model behind the check ---------------------------------------------------------------
 
+# Backends that cannot fill a free-form verdict schema: the SLM answers in its own fixed format.
+_NO_VERDICT = ("grounded-ai/",)
+
 
 def _evaluator(model: str, **kwargs):
     from . import Evaluator
@@ -88,10 +92,26 @@ def _evaluator(model: str, **kwargs):
     return Evaluator(model, **kwargs)
 
 
+def _raise_on_error(result):
+    if isinstance(result, EvaluationError):
+        raise RuntimeError(f"{result.error_code}: {result.message}")
+    return result
+
+
 def make_checker(
     model: str, base_url: Optional[str] = None, region: Optional[str] = None
 ) -> Callable[..., Verdict]:
-    """A function (response, context, query) -> Verdict backed by `model`. Raises on any failure."""
+    """A function (response, context, query) -> Verdict backed by `model`.
+    Raises ValueError for a model or flag that cannot work, and RuntimeError when a check fails."""
+    if model.startswith(_NO_VERDICT):
+        raise ValueError(
+            f"{model} cannot give a faithfulness verdict; use a decider/ model or an LLM judge"
+        )
+    if region and not model.startswith("bedrock/"):
+        raise ValueError("--region only applies to bedrock/ models")
+    if base_url and not model.startswith("decider/"):
+        raise ValueError("--base-url only applies to decider/ models")
+
     if model.startswith("decider/"):
         from .backends.decider import HALLUCINATION, DeciderInput
 
@@ -99,19 +119,19 @@ def make_checker(
 
         def check(response: str, context: str, query: Optional[str]) -> Verdict:
             state = {"context": context, "query": query, "response": response}
-            result = evaluator.evaluate(
-                DeciderInput(
-                    state={k: v for k, v in state.items() if v is not None},
-                    questions={"verdict": HALLUCINATION},
+            result = _raise_on_error(
+                evaluator.evaluate(
+                    DeciderInput(
+                        state={k: v for k, v in state.items() if v is not None},
+                        questions={"verdict": HALLUCINATION},
+                    )
                 )
             )
-            if isinstance(result, EvaluationError):
-                raise RuntimeError(f"{result.error_code}: {result.message}")
             answer = result.answers["verdict"]
             return Verdict(
                 faithful=answer.choice == "faithful",
                 model=model,
-                score=answer.probabilities.get("hallucination"),
+                hallucination_probability=answer.probabilities.get("hallucination"),
             )
 
         return check
@@ -119,17 +139,20 @@ def make_checker(
     kwargs: dict = {"system_prompt": SYSTEM_PROMPT}
     if region:
         kwargs["region_name"] = region
-    if base_url:
-        kwargs["base_url"] = base_url
     evaluator = _evaluator(model, **kwargs)
 
     def check(response: str, context: str, query: Optional[str]) -> Verdict:
-        result = evaluator.evaluate(
-            FaithfulnessInput(context=context, query=query, response=response),
-            output_schema=FaithfulnessJudgement,
+        result = _raise_on_error(
+            evaluator.evaluate(
+                FaithfulnessInput(context=context, query=query, response=response),
+                output_schema=FaithfulnessJudgement,
+            )
         )
-        if isinstance(result, EvaluationError):
-            raise RuntimeError(f"{result.error_code}: {result.message}")
+        if not isinstance(result, FaithfulnessJudgement):
+            raise RuntimeError(
+                f"{model} returned {type(result).__name__}, not a faithfulness verdict "
+                "(classifier models cannot judge faithfulness)"
+            )
         return Verdict(
             faithful=result.verdict == "supported",
             model=model,
@@ -140,6 +163,9 @@ def make_checker(
 
 
 # --- transcripts ------------------------------------------------------------------------------
+
+# User messages Codex injects into the rollout: context for the model, not a prompt from the user.
+_CODEX_INJECTED = ("<environment_context>", "<user_instructions>", "# AGENTS.md")
 
 
 def _text(content: Any) -> str:
@@ -154,6 +180,10 @@ def _text(content: Any) -> str:
             for b in content
         ).strip()
     return "" if content is None else str(content)
+
+
+def _blocks(content: Any, kind: str) -> list:
+    return [b for b in content if isinstance(b, dict) and b.get("type") == kind]
 
 
 def read_turn(transcript_path: Optional[str]) -> Turn:
@@ -172,34 +202,29 @@ def read_turn(transcript_path: Optional[str]) -> Turn:
             row.get("message"), dict
         ):
             content = row["message"].get("content")
-            if row["type"] == "user":
-                if isinstance(content, str):
-                    if not row.get("isMeta"):
-                        turn = Turn(query=content)
-                elif isinstance(content, list):
-                    for block in content:
-                        if (
-                            isinstance(block, dict)
-                            and block.get("type") == "tool_result"
-                        ):
-                            turn.tool_outputs.append(_text(block.get("content")))
-            else:
-                text = _text(
-                    [
-                        b
-                        for b in content or []
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    ]
-                )
+            if row["type"] == "assistant":
+                text = _text(_blocks(content or [], "text"))
                 if text:
                     turn.answer = text
+            elif row.get("isMeta") or row.get("isCompactSummary"):
+                continue
+            elif isinstance(content, str):
+                turn = Turn(query=content)
+            elif isinstance(content, list):
+                results = _blocks(content, "tool_result")
+                if results:
+                    turn.tool_outputs += [_text(b.get("content")) for b in results]
+                elif _blocks(content, "text"):  # a prompt with attachments
+                    turn = Turn(query=_text(_blocks(content, "text")))
         # Codex: {"type": "response_item", "payload": {...}}
         elif row.get("type") == "response_item" and isinstance(
             row.get("payload"), dict
         ):
             payload = row["payload"]
             if payload.get("type") == "message" and payload.get("role") == "user":
-                turn = Turn(query=_text(payload.get("content")))
+                text = _text(payload.get("content"))
+                if not text.lstrip().startswith(_CODEX_INJECTED):
+                    turn = Turn(query=text)
             elif payload.get("type") == "function_call_output":
                 turn.tool_outputs.append(_text(payload.get("output")))
             elif (
@@ -224,8 +249,12 @@ def _evidence(tool_outputs: List[str], max_chars: int) -> str:
 def _check(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     context = args.context
     if context and context.startswith("@"):
-        with open(context[1:]) as f:
-            context = f.read()
+        try:
+            with open(context[1:]) as f:
+                context = f.read()
+        except OSError as e:
+            print(f"grounded-ai check: cannot read --context: {e}", file=stderr)
+            return 2
     if not context:
         print("grounded-ai check: --context is required (text, or @file)", file=stderr)
         return 2
@@ -270,8 +299,8 @@ def _hook(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
         f" {verdict.reasoning}"
         if verdict.reasoning
         else (
-            f" (probability it is unsupported: {verdict.score:.2f})"
-            if verdict.score is not None
+            f" (probability of a hallucination: {verdict.hallucination_probability:.2f})"
+            if verdict.hallucination_probability is not None
             else ""
         )
     )
@@ -304,6 +333,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Is a response supported by its context? Exit 0 yes, 1 no, 2 error.",
     )
     common(check)
+    check.set_defaults(run=_check)
     check.add_argument("--context", help="The evidence: text, or @path to a file")
     check.add_argument("--query", help="The question the response answers (optional)")
     check.add_argument(
@@ -315,6 +345,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Stop hook for Claude Code and Codex: re-check unsupported answers.",
     )
     common(hook)
+    hook.set_defaults(run=_hook)
     hook.add_argument(
         "--max-context-chars",
         type=int,
@@ -326,9 +357,9 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(
     argv: Optional[List[str]] = None,
-    stdin: TextIO = None,
-    stdout: TextIO = None,
-    stderr: TextIO = None,
+    stdin: Optional[TextIO] = None,
+    stdout: Optional[TextIO] = None,
+    stderr: Optional[TextIO] = None,
 ) -> int:
     stdin, stdout, stderr = (
         stdin or sys.stdin,
@@ -339,7 +370,7 @@ def main(
         args = _parser().parse_args(argv)
     except SystemExit as e:
         return 2 if e.code else 0
-    return {"check": _check, "hook": _hook}[args.command](args, stdin, stdout, stderr)
+    return args.run(args, stdin, stdout, stderr)
 
 
 def entrypoint() -> None:

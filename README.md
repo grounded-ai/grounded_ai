@@ -274,10 +274,10 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 grounded-ai check --model bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --context @docs/refund-policy.md --query "How long do refunds take?" \
   --response "Refunds arrive within 3 days."
-# {"faithful": false, "model": "...", "score": null, "reasoning": "The policy says 5-7 business days..."}
+# {"faithful": false, "model": "...", "hallucination_probability": null, "reasoning": "The policy says 5-7 business days..."}
 ```
 
-The response can also come on stdin (`echo "..." | grounded-ai check ...`). With a `decider/` model, `score` is the Decider's probability of a hallucination.
+The response can also come on stdin (`echo "..." | grounded-ai check ...`). With a `decider/` model, `hallucination_probability` is the Decider's probability of a hallucination (LLM judges give `reasoning` instead). The `grounded-ai/` SLM and `hf/` text-classification models answer in fixed formats and can't be used here.
 
 `grounded-ai hook` runs the same check as a **Stop hook** for Claude Code and Codex. When the agent finishes a turn, it checks the agent's final answer against the tool output from that turn (files read, commands run). If the answer is not supported, the agent is asked to re-check its claims before it stops. The hook:
 
@@ -321,7 +321,7 @@ timeout = 60
 statusMessage = "Checking the answer against tool output"
 ```
 
-Options: `--base-url` (decider server), `--region` (Bedrock), and for the hook `--max-context-chars` (default 20000; the most recent tool output is kept).
+Options: `--base-url` (`decider/` only), `--region` (`bedrock/` only), and for the hook `--max-context-chars` (default 20000; the most recent tool output is kept).
 
 ## Implementation Status
 

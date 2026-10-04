@@ -29,7 +29,7 @@ class FakeChecker:
         faithful = "90 days" not in response
         return Verdict(
             faithful=faithful,
-            score=0.1 if faithful else 0.9,
+            hallucination_probability=0.1 if faithful else 0.9,
             reasoning=None if faithful else "The context says 30 days, not 90.",
             model="fake/model",
         )
@@ -437,7 +437,7 @@ class TestMakeChecker:
             "response": BAD,
         }
         assert set(seen["questions"]) == {"verdict"}
-        assert (verdict.faithful, verdict.score) == (False, 0.8)
+        assert (verdict.faithful, verdict.hallucination_probability) == (False, 0.8)
 
     def test_llm_models_fill_a_fixed_verdict_schema(self, monkeypatch):
         seen = {}
@@ -471,3 +471,169 @@ class TestMakeChecker:
         monkeypatch.setattr(cli, "_evaluator", lambda model, **kwargs: Failing())
         with pytest.raises(RuntimeError, match="API key is invalid"):
             cli.make_checker("anthropic/claude-haiku-4-5")(BAD, CONTEXT, None)
+
+    def test_a_missing_context_file_is_a_usage_error(self, checker):
+        code, out, err = run(
+            [
+                "check",
+                "--model",
+                "fake/model",
+                "--response",
+                GOOD,
+                "--context",
+                "@/no/such/file",
+            ]
+        )
+        assert (code, out) == (2, "")
+        assert "/no/such/file" in err
+
+    def test_the_slm_is_refused_before_loading_it(self, monkeypatch):
+        monkeypatch.setattr(
+            cli, "_evaluator", lambda model, **kwargs: pytest.fail("loaded")
+        )
+        with pytest.raises(ValueError, match="faithfulness verdict"):
+            cli.make_checker("grounded-ai/phi4-mini-judge")
+
+    @pytest.mark.parametrize(
+        "model, flags, message",
+        [
+            ("anthropic/claude-haiku-4-5", {"region": "us-east-1"}, "--region"),
+            ("decider/m", {"region": "us-east-1"}, "--region"),
+            ("anthropic/claude-haiku-4-5", {"base_url": "http://x"}, "--base-url"),
+            ("bedrock/m", {"base_url": "http://x"}, "--base-url"),
+        ],
+    )
+    def test_flags_for_another_backend_are_refused(
+        self, monkeypatch, model, flags, message
+    ):
+        monkeypatch.setattr(
+            cli, "_evaluator", lambda model, **kwargs: pytest.fail("built")
+        )
+        with pytest.raises(ValueError, match=message):
+            cli.make_checker(model, **flags)
+
+    def test_flags_reach_their_backend(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            cli, "_evaluator", lambda model, **kwargs: seen.setdefault(model, kwargs)
+        )
+        cli.make_checker("bedrock/m", region="eu-west-1")
+        cli.make_checker("decider/m", base_url="http://localhost:9000")
+        assert seen["bedrock/m"]["region_name"] == "eu-west-1"
+        assert seen["decider/m"] == {"base_url": "http://localhost:9000"}
+
+    def test_a_model_that_ignores_the_verdict_schema_raises(self, monkeypatch):
+        from grounded_ai.schemas import EvaluationOutput
+
+        class Classifier:
+            def evaluate(self, input_data, output_schema=None):
+                return EvaluationOutput(score=0.9, label="INJECTION", confidence=0.9)
+
+        monkeypatch.setattr(cli, "_evaluator", lambda model, **kwargs: Classifier())
+        with pytest.raises(RuntimeError, match="faithfulness verdict"):
+            cli.make_checker("hf/meta-llama/Prompt-Guard-86M")(BAD, CONTEXT, None)
+
+    def test_the_judge_prompt_is_a_jinja_template_you_can_override(self):
+        default = cli.FaithfulnessInput(context=CONTEXT, response=BAD)
+        assert (
+            CONTEXT in default.formatted_prompt
+            and "None" not in default.formatted_prompt
+        )
+        custom = cli.FaithfulnessInput(
+            context=CONTEXT,
+            response=BAD,
+            base_template="E={{ context }} A={{ response }}",
+        )
+        assert custom.formatted_prompt == f"E={CONTEXT} A={BAD}"
+
+
+class TestTurnBoundaries:
+    def _write(self, tmp_path, rows):
+        path = tmp_path / "t.jsonl"
+        path.write_text("\n".join(json.dumps(r) for r in rows))
+        return path
+
+    def _tool(self, text):
+        return {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "t", "content": text}
+                ],
+            },
+        }
+
+    def test_a_claude_prompt_with_an_image_starts_a_turn(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            [
+                {"type": "user", "message": {"role": "user", "content": "old"}},
+                self._tool("old output"),
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "What does this screenshot say?"},
+                            {
+                                "type": "image",
+                                "source": {"type": "base64", "data": "..."},
+                            },
+                        ],
+                    },
+                },
+                self._tool("new output"),
+            ],
+        )
+        turn = cli.read_turn(str(path))
+        assert turn.query == "What does this screenshot say?"
+        assert turn.tool_outputs == ["new output"]
+
+    def test_a_compact_summary_does_not_start_a_turn(self, tmp_path):
+        path = self._write(
+            tmp_path,
+            [
+                {"type": "user", "message": {"role": "user", "content": "Fix the bug"}},
+                self._tool("before compaction"),
+                {
+                    "type": "user",
+                    "isCompactSummary": True,
+                    "message": {
+                        "role": "user",
+                        "content": "This session is being continued...",
+                    },
+                },
+                self._tool("after compaction"),
+            ],
+        )
+        turn = cli.read_turn(str(path))
+        assert turn.query == "Fix the bug"
+        assert turn.tool_outputs == ["before compaction", "after compaction"]
+
+    @pytest.mark.parametrize(
+        "injected",
+        [
+            "<environment_context>\n  <cwd>/x</cwd>\n</environment_context>",
+            "<user_instructions>be terse</user_instructions>",
+            "# AGENTS.md instructions for /x\n\n<INSTRUCTIONS>...</INSTRUCTIONS>",
+        ],
+    )
+    def test_codex_injected_context_does_not_start_a_turn(self, tmp_path, injected):
+        def user(text):
+            return {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}],
+                },
+            }
+
+        out = {
+            "type": "response_item",
+            "payload": {"type": "function_call_output", "output": "ls output"},
+        }
+        path = self._write(tmp_path, [user("List the files"), out, user(injected)])
+        turn = cli.read_turn(str(path))
+        assert (turn.query, turn.tool_outputs) == ("List the files", ["ls output"])
