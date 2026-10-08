@@ -1,4 +1,4 @@
-"""Builds the pull-request comment for the Decider live test: test output and notebook outputs."""
+"""Builds the pull-request comment for the Jev live test: test output and notebook outputs."""
 
 import json
 import os
@@ -29,9 +29,9 @@ def notebook_outputs(path: str) -> dict:
 
 
 tests = read("live-tests.txt")
-outputs = notebook_outputs("executed/strands_decider.executed.ipynb")
+outputs = notebook_outputs("executed/jev.executed.ipynb")
 sha = os.getenv("GITHUB_SHA", "")[:7]
 
-print(f"### Decider live test ({os.getenv('DECIDER_CHECKPOINT')}, {os.getenv('DECIDER_DEVICE')}) at {sha}\n")
+print(f"### Jev live test, local model ({os.getenv('DECIDER_CHECKPOINT')}, {os.getenv('DECIDER_DEVICE')}) at {sha}\n")
 print(f"<details open><summary>pytest tests/integration</summary>\n\n{FENCE}text\n{tests[-30000:] or 'no output'}\n{FENCE}\n</details>\n")
 print(f"<details><summary>Notebook outputs</summary>\n\n{FENCE}json\n{json.dumps(outputs, indent=1)}\n{FENCE}\n</details>")

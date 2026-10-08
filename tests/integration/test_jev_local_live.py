@@ -1,9 +1,9 @@
 """
-Runs the Decider backend against a real `strands-decider serve` and a real checkpoint.
+Runs JevEvaluator's local mode against a real `strands-decider serve` and a real checkpoint.
 
 Skipped unless DECIDER_LIVE=1, because it downloads the checkpoint and loads a 2B model:
 
-    pip install -e ".[decider]" pytest
+    pip install -e ".[jev-local]" pytest
     DECIDER_LIVE=1 pytest tests/integration -s
 
 DECIDER_CHECKPOINT, DECIDER_PORT and DECIDER_DEVICE override the defaults.
@@ -14,14 +14,14 @@ import os
 import pytest
 
 from grounded_ai import Evaluator
-from grounded_ai.backends.decider import (
+from grounded_ai.backends.jev import (
     HALLUCINATION,
     RAG_RELEVANCE,
     TOXICITY,
     ChoiceAnswer,
     ChoiceQuestion,
-    DeciderInput,
-    DeciderOutput,
+    JevInput,
+    JevOutput,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
@@ -43,15 +43,15 @@ Michael Collins remained in orbit in the Command Module.
 
 @pytest.fixture(scope="module")
 def evaluator():
-    evaluator = Evaluator(f"decider/{CHECKPOINT}", timeout=300.0)
+    evaluator = Evaluator("jev", use_local_model=True, local_model=CHECKPOINT, timeout=300.0)
     evaluator.backend.warmup(port=PORT, device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
     yield evaluator
     evaluator.backend.shutdown()
 
 
-def ask(evaluator, state, **questions) -> DeciderOutput:
-    result = evaluator.evaluate(DeciderInput(state=state, questions=questions))
-    assert isinstance(result, DeciderOutput), result
+def ask(evaluator, state, **questions) -> JevOutput:
+    result = evaluator.evaluate(JevInput(state=state, questions=questions))
+    assert isinstance(result, JevOutput), result
     print(f"\n{state if isinstance(state, str) else dict(state)}\n  -> {result.model_dump_json()}")
     return result
 
@@ -90,14 +90,47 @@ def test_toxicity(evaluator):
     assert 0.0 <= civil.confidence <= 1.0
 
 
-def test_rag_relevance(evaluator):
-    def relevance(response):
-        state = {"query": "What are the benefits of vitamin D?", "response": response}
-        return ask(evaluator, state, relevance=RAG_RELEVANCE).answers["relevance"]
+# (query, retrieved chunk, relevant?) Hard cases on purpose: several unrelated chunks are on the
+# query's topic but do not hold the answer.
+RAG_CASES = [
+    ("What are the benefits of vitamin D?", "Vitamin D helps the body absorb calcium, which keeps bones strong.", True),
+    ("What are the benefits of vitamin D?", "The Eiffel Tower was completed in 1889 and is 330 metres tall.", False),
+    ("What are the benefits of vitamin D?", "Vitamin D was first isolated in the 1920s by researchers studying rickets.", False),
+    ("How long is the refund window?", "Customers may return items within 30 days of delivery for a full refund.", True),
+    ("How long is the refund window?", "Our support team is available Monday to Friday, 9am to 5pm.", False),
+    ("How long is the refund window?", "Refunds are issued to the original payment method once the return is received.", False),
+    ("What port does the API listen on?", "By default the API server binds to 0.0.0.0 on port 8443.", True),
+    ("What port does the API listen on?", "The API supports JSON and MessagePack request bodies.", False),
+    ("Who wrote Pride and Prejudice?", "Pride and Prejudice is an 1813 novel by Jane Austen.", True),
+    ("Who wrote Pride and Prejudice?", "The novel has been adapted for film and television many times.", False),
+    ("What is the capital of Australia?", "Canberra was selected as the capital in 1908 as a compromise between Sydney and Melbourne.", True),
+    ("What is the capital of Australia?", "Sydney is Australia's largest city and home to its famous opera house.", False),
+    ("When does the store open on Sundays?", "On Sundays we open at 10am and close at 4pm.", True),
+    ("When does the store open on Sundays?", "We are closed on public holidays, including Christmas Day.", False),
+    ("When does the store open on Sundays?", "The store has been family-owned since 1972.", False),
+    ("What is the maximum file size for uploads?", "Uploads are limited to 25 MB per file.", True),
+    ("What is the maximum file size for uploads?", "Supported upload formats are PNG, JPEG and PDF.", False),
+    ("How do I reset my password?", "Click 'Forgot password' on the sign-in page and follow the emailed link.", True),
+    ("How do I reset my password?", "Passwords must be at least 12 characters long.", False),
+    ("What causes tides?", "Tides are caused mainly by the gravitational pull of the Moon on Earth's oceans.", True),
+    ("What causes tides?", "The highest tides in the world occur in the Bay of Fundy.", False),
+    ("Which language is the backend written in?", "The backend service is implemented in Go 1.22.", True),
+    ("Which language is the backend written in?", "The frontend is a React single-page app.", False),
+    ("Is the warranty transferable?", "The two-year warranty stays with the product if it is sold or given away.", True),
+    ("Is the warranty transferable?", "The warranty covers manufacturing defects but not accidental damage.", False),
+]
 
-    on_topic = relevance("Vitamin D helps the body use calcium, which keeps bones strong.")
-    off_topic = relevance("The Eiffel Tower is located in Paris, France.")
-    assert p(on_topic, "relevant") > p(off_topic, "relevant")
+
+def test_rag_relevance_judges_retrieved_chunks(evaluator):
+    """The labelled chunks are classified correctly, allowing one borderline miss so a different
+    device or checkpoint does not fail on a single case."""
+    wrong = []
+    for query, chunk, relevant in RAG_CASES:
+        answer = ask(evaluator, {"query": query, "context": chunk}, relevance=RAG_RELEVANCE).answers["relevance"]
+        if (answer.choice == "relevant") != relevant:
+            wrong.append(f"p(relevant)={p(answer, 'relevant'):.3f} for {chunk!r}")
+    print(f"\nRAG relevance: {len(RAG_CASES) - len(wrong)}/{len(RAG_CASES)} correct")
+    assert len(wrong) <= 1, wrong
 
 
 def test_all_three_question_types_in_one_request(evaluator):
@@ -176,7 +209,7 @@ VARIETY = [
 
 @pytest.mark.parametrize("state,question,answer_type", VARIETY)
 def test_the_real_server_accepts_and_answers_every_shape(evaluator, state, question, answer_type):
-    """A DeciderOutput back means the request was accepted and the answer matched the question:
+    """A JevOutput back means the request was accepted and the answer matched the question:
     its type, and its probabilities over exactly the options or levels that were asked."""
     answer = ask(evaluator, state, q=question).answers["q"]
     assert isinstance(answer, answer_type)
@@ -199,7 +232,7 @@ def test_the_real_server_refuses_what_the_input_class_refuses(evaluator):
 
 
 def test_custom_input_class(evaluator):
-    class CodeReview(DeciderInput):
+    class CodeReview(JevInput):
         language: str
         code: str
 
@@ -213,7 +246,7 @@ def test_custom_input_class(evaluator):
 
 
 def test_wrong_model_name_is_refused(evaluator):
-    other = Evaluator("decider/some-other-checkpoint", base_url=f"http://127.0.0.1:{PORT}")
-    result = other.evaluate(DeciderInput(state="x", questions={"tone": TOXICITY}))
+    other = Evaluator("jev", use_local_model=True, local_model="some-other-checkpoint", base_url=f"http://127.0.0.1:{PORT}")
+    result = other.evaluate(JevInput(state="x", questions={"tone": TOXICITY}))
     assert isinstance(result, EvaluationError)
     assert result.error_code == "MODEL_MISMATCH"

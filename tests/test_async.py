@@ -29,7 +29,7 @@ class TestAsyncEvaluatorOpenAI:
     @pytest.fixture
     def mock_async_client(self):
         client = MagicMock()
-        client.beta.chat.completions.parse = AsyncMock()
+        client.chat.completions.parse = AsyncMock()
         return client
 
     @pytest.mark.asyncio
@@ -39,7 +39,7 @@ class TestAsyncEvaluatorOpenAI:
         mock_message.parsed = EvaluationOutput(
             score=0.1, label="faithful", confidence=0.95, reasoning="Looks good."
         )
-        mock_async_client.beta.chat.completions.parse.return_value.choices = [
+        mock_async_client.chat.completions.parse.return_value.choices = [
             MagicMock(message=mock_message)
         ]
 
@@ -51,14 +51,14 @@ class TestAsyncEvaluatorOpenAI:
 
         assert isinstance(result, EvaluationOutput)
         assert result.label == "faithful"
-        mock_async_client.beta.chat.completions.parse.assert_awaited_once()
+        mock_async_client.chat.completions.parse.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_evaluate_refusal(self, mock_async_client):
         mock_message = MagicMock()
         mock_message.refusal = "Content policy violation."
         mock_message.parsed = None
-        mock_async_client.beta.chat.completions.parse.return_value.choices = [
+        mock_async_client.chat.completions.parse.return_value.choices = [
             MagicMock(message=mock_message)
         ]
 
@@ -78,7 +78,7 @@ class TestAsyncEvaluatorOpenAI:
         mock_message.parsed = EvaluationOutput(
             score=0.0, label="ok", confidence=1.0, reasoning="ok"
         )
-        mock_async_client.beta.chat.completions.parse.return_value.choices = [
+        mock_async_client.chat.completions.parse.return_value.choices = [
             MagicMock(message=mock_message)
         ]
 
@@ -88,14 +88,14 @@ class TestAsyncEvaluatorOpenAI:
 
         await evaluator.evaluate(response="test", temperature=0.2)
 
-        _, kwargs = mock_async_client.beta.chat.completions.parse.call_args
+        _, kwargs = mock_async_client.chat.completions.parse.call_args
         assert kwargs["temperature"] == 0.2
 
     @pytest.mark.asyncio
     async def test_evaluate_error_handling(self, mock_async_client):
         err = Exception("Rate limit exceeded")
         err.status_code = 429
-        mock_async_client.beta.chat.completions.parse.side_effect = err
+        mock_async_client.chat.completions.parse.side_effect = err
 
         backend = OpenAIBackend(model_name="gpt-4o", async_client=mock_async_client)
         evaluator = AsyncEvaluator.__new__(AsyncEvaluator)
@@ -114,7 +114,7 @@ class TestAsyncEvaluatorAnthropic:
     @pytest.fixture
     def mock_async_client(self):
         client = MagicMock()
-        client.beta.messages.parse = AsyncMock()
+        client.messages.parse = AsyncMock()
         return client
 
     @pytest.mark.asyncio
@@ -123,7 +123,7 @@ class TestAsyncEvaluatorAnthropic:
         mock_response.parsed_output = EvaluationOutput(
             score=0.9, label="toxic", confidence=0.98, reasoning="Contains hate speech."
         )
-        mock_async_client.beta.messages.parse.return_value = mock_response
+        mock_async_client.messages.parse.return_value = mock_response
 
         backend = AnthropicBackend(
             model_name="claude-haiku-4-5-20251001", async_client=mock_async_client
@@ -135,16 +135,16 @@ class TestAsyncEvaluatorAnthropic:
 
         assert isinstance(result, EvaluationOutput)
         assert result.label == "toxic"
-        mock_async_client.beta.messages.parse.assert_awaited_once()
+        mock_async_client.messages.parse.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_evaluate_passes_output_format_directly(self, mock_async_client):
-        """beta.messages.parse receives the Pydantic class directly — no schema surgery."""
+        """messages.parse receives the Pydantic class directly — no schema surgery."""
         mock_response = MagicMock()
         mock_response.parsed_output = EvaluationOutput(
             score=0.0, label="ok", confidence=1.0, reasoning="ok"
         )
-        mock_async_client.beta.messages.parse.return_value = mock_response
+        mock_async_client.messages.parse.return_value = mock_response
 
         backend = AnthropicBackend(
             model_name="claude-haiku-4-5-20251001", async_client=mock_async_client
@@ -154,14 +154,14 @@ class TestAsyncEvaluatorAnthropic:
 
         await evaluator.evaluate(response="test")
 
-        _, kwargs = mock_async_client.beta.messages.parse.call_args
+        _, kwargs = mock_async_client.messages.parse.call_args
         assert kwargs["output_format"] is EvaluationOutput
 
     @pytest.mark.asyncio
     async def test_evaluate_empty_response(self, mock_async_client):
         mock_response = MagicMock()
         mock_response.parsed_output = None
-        mock_async_client.beta.messages.parse.return_value = mock_response
+        mock_async_client.messages.parse.return_value = mock_response
 
         backend = AnthropicBackend(
             model_name="claude-haiku-4-5-20251001", async_client=mock_async_client
@@ -178,7 +178,7 @@ class TestAsyncEvaluatorAnthropic:
     async def test_evaluate_error_handling(self, mock_async_client):
         err = Exception("Service unavailable")
         err.status_code = 503
-        mock_async_client.beta.messages.parse.side_effect = err
+        mock_async_client.messages.parse.side_effect = err
 
         backend = AnthropicBackend(
             model_name="claude-haiku-4-5-20251001", async_client=mock_async_client

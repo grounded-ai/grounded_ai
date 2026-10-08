@@ -41,9 +41,10 @@ pip install grounded-ai
 pip install grounded-ai[slm]
 ```
 
-**Local Decision Model (Strands Decider):**
+**Decision Model (Jev):**
 ```bash
-pip install grounded-ai[decider]
+pip install grounded-ai[jev]         # hosted Jev
+pip install grounded-ai[jev-local]   # also run it locally (Strands Decider)
 ```
 
 ## Quick Start
@@ -159,22 +160,32 @@ print(result.label) # 'JAILBREAK'
 print(result.score) # 0.99
 ```
 
-### 7. Decision Models (Strands Decider)
-[Strands Decider](https://github.com/strands-labs/strands-decider) is a 2B open-weights decision model (Apache-2.0). It answers typed questions with probabilities instead of generating text, so the output cannot leave the schema and `confidence` comes from the model's own distribution. It runs locally on a GPU, Apple Silicon or CPU.
+### 7. Decision Models (Jev)
+> **2.0.0:** the Decider backend is now `JevEvaluator`. `"decider/<checkpoint>"` is `Evaluator("jev", use_local_model=True, local_model="<checkpoint>")`; `DeciderInput`/`DeciderOutput` are `JevInput`/`JevOutput`; the `[decider]` extra is `[jev-local]`. No aliases are kept.
+
+[Jev](https://docs.typesafe.ai) is TypeSafe's decision model. It answers typed questions with probabilities instead of generating text, so the output cannot leave the schema and `confidence` comes from the model's own distribution.
+
+`JevEvaluator` runs it in one of two places, with the same input and output:
+
+- **Hosted** (default): TypeSafe's API at `https://api.typesafe.ai/v1/systemone`. Set `TYPESAFE_API_KEY` (console.typesafe.ai -> API Keys).
+- **Local** (`use_local_model=True`): [Strands Decider](https://github.com/strands-labs/strands-decider), a 2B open-weights model (Apache-2.0) with the same `/v1/systemone` contract, on a GPU, Apple Silicon or CPU. No key, no per-token cost.
 
 ```bash
-pip install grounded-ai[decider]   # adds httpx and the strands-decider server
+pip install grounded-ai[jev]         # hosted: adds httpx
+pip install grounded-ai[jev-local]   # local: also adds the strands-decider server
 ```
 
 ```python
 from grounded_ai import Evaluator
-from grounded_ai.backends.decider import HALLUCINATION, DeciderInput
+from grounded_ai.backends.jev import HALLUCINATION, JevInput
 
-# The model name is the checkpoint to serve. warmup() starts the server and waits until it is ready.
-evaluator = Evaluator("decider/StrandsAgents/strands-decider-2B-hobson-v19")
-evaluator.backend.warmup(port=8000)
+evaluator = Evaluator("jev/jev-latest")              # hosted; pin a version with "jev/jev-1.13.0"
 
-result = evaluator.evaluate(DeciderInput(
+# or run it locally: warmup() starts the server and waits until it is ready
+# evaluator = Evaluator("jev", use_local_model=True)  # local_model="StrandsAgents/strands-decider-2B-hobson-v19"
+# evaluator.backend.warmup(port=8000)
+
+result = evaluator.evaluate(JevInput(
     state={
         "context": "Refunds are accepted within 30 days of purchase.",
         "query": "How long do I have to return an item?",
@@ -184,13 +195,16 @@ result = evaluator.evaluate(DeciderInput(
 ))
 verdict = result.answers["verdict"]
 print(verdict.choice)         # 'hallucination'
-print(verdict.probabilities)  # {'hallucination': 0.935, 'faithful': 0.065}
-print(verdict.confidence)     # 0.871
+print(verdict.probabilities)  # probability of each option
+print(verdict.confidence)     # 0 (uniform) to 1 (certain)
+print(result.model)           # the versioned model that answered, e.g. 'jev-1.13.0'
 ```
 
-**The server.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. The server's output goes to a log file (pass `verbose=True` to see it). A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint you named.
+**Hosted.** Requests carry `Authorization: Bearer $TYPESAFE_API_KEY`. Rate-limited (429) and overloaded (529) responses are retried with backoff, honouring `retry-after` (`max_retries=2` by default). `TYPESAFE_API_BASE` (or `base_url=`) points at a proxy such as LiteLLM's TypeSafe pass-through.
 
-**The contract.** Every call takes a `DeciderInput`: a `state` (what the model reads) and named `questions` (what it is asked). It returns a `DeciderOutput`: one answer per question. Both sides are fixed classes that mirror the model:
+**Local.** The same code runs locally by adding `use_local_model=True`; the hosted model name is then ignored and `local_model` picks the checkpoint. `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. The server's output goes to a log file (pass `verbose=True` to see it). A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint in `local_model`. The local server takes question criteria as text only; structured (JSON) or `null` criteria need hosted Jev and are refused locally before anything is sent.
+
+**The contract.** Every call takes a `JevInput`: a `state` (what the model reads) and named `questions` (what it is asked). It returns a `JevOutput`: one answer per question. Both sides are fixed classes that mirror the model:
 
 | Question | You give | Answer | You get |
 | :--- | :--- | :--- | :--- |
@@ -199,9 +213,9 @@ print(verdict.confidence)     # 0.871
 | `ScoreQuestion` | `instructions`, `criteria` [levels, lowest first] | `ScoreAnswer` | `.score` (level index from 0), `.legend`, `.probabilities`, `.confidence` |
 
 ```python
-from grounded_ai.backends.decider import ChoiceQuestion, NoulQuestion, ScoreQuestion
+from grounded_ai.backends.jev import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
-result = evaluator.evaluate(DeciderInput(
+result = evaluator.evaluate(JevInput(
     state="You have charged me twice and my account is now overdrawn. I need this reversed today.",
     questions={
         "urgent": NoulQuestion(instructions="This needs a reply within the hour."),
@@ -220,20 +234,20 @@ result.answers["area"].choice          # 'billing'
 result.answers["clarity"].score        # 1.3147 (between "partly clear" and "clear")
 ```
 
-The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they refer to "the response", "the context" and "the query", so name those in your state. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
+The result is always a `JevOutput` (`.answers`, plus `.model`, `.usage`, and `.latency_ms` from the local server). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they read named fields from the state: `HALLUCINATION` checks a `response` against its `context`, `TOXICITY` judges a `response`, and `RAG_RELEVANCE` judges whether a retrieved chunk in `context` contains information that can answer the `query` (a chunk on the right topic without the answer is `unrelated`). The SLM backend takes that chunk as `response`; on Jev it is `context`. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
 
-**Its own input and output.** `DeciderInput` and `DeciderOutput` are separate from `EvaluationInput` and `EvaluationOutput`, which describe a text-generating judge. `DeciderInput` has exactly two fields, `questions` and `state`, and `output_schema` cannot replace `DeciderOutput`.
+**Its own input and output.** `JevInput` and `JevOutput` are separate from `EvaluationInput` and `EvaluationOutput`, which describe a text-generating judge. `JevInput` has exactly two fields, `questions` and `state`, and `output_schema` cannot replace `JevOutput`.
 
 **Custom inputs.** The state is the part you shape:
 
 - Pass `state` as text or any JSON: it is sent as is.
-- Subclass `DeciderInput` and add your own fields: they are sent as a JSON object, in the order you declare them (put the evidence before the text being judged).
+- Subclass `JevInput` and add your own fields: they are sent as a JSON object, in the order you declare them (put the evidence before the text being judged).
 - Override `build_state()` to render your fields any way you like.
 
 ```python
-from grounded_ai.backends.decider import DeciderInput
+from grounded_ai.backends.jev import JevInput
 
-class SupportTurn(DeciderInput):
+class SupportTurn(JevInput):
     customer_message: str
     agent_reply: str
 
@@ -243,7 +257,7 @@ evaluator.evaluate(SupportTurn(
     questions={"apologizes": NoulQuestion(instructions="The agent apologizes.")},
 ))
 
-class PortPolicy(DeciderInput):
+class PortPolicy(JevInput):
     text: str
 
     def build_state(self):
@@ -258,13 +272,53 @@ evaluator.evaluate(PortPolicy(
 ))
 ```
 
-Shorthand: `evaluator.evaluate(state=..., questions=...)` builds the `DeciderInput` for you. For your own class, pass it once as `Evaluator("decider/...", input_schema=SupportTurn)` and its fields work as keywords too.
+Shorthand: `evaluator.evaluate(state=..., questions=...)` builds the `JevInput` for you. For your own class, pass it once as `Evaluator("jev/...", input_schema=SupportTurn)` and its fields work as keywords too.
 
 **The contract cannot be broken.** Whatever an input class does, the request is validated against the `/v1/systemone` contract before it is sent: a state that is not text or JSON, an unknown question type, a stray key on a question, or no questions at all returns `INVALID_REQUEST` and nothing goes to the server.
 
 The server truncates input that overflows the model's window from the end, without an error. The backend warns when the input is clearly too long (a rough character-count check against the window `/health` reports).
 
-On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).
+Locally on Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concurrent requests. With `AsyncEvaluator`, keep one request in flight (`asyncio.Semaphore(1)`).
+
+### 8. Two-Stage Evaluation (Jev first, LLM judge for the rest)
+`CascadeEvaluator` asks Jev every question in one cheap request. Any answer below `min_confidence` is escalated: the original state and only those leftover questions go to an LLM judge in one call. Confident answers come back exactly as Jev gave them; escalated ones come back as a `JudgedAnswer` with the judge's pick and reasoning, and no probabilities, because an LLM does not measure any.
+
+```python
+from grounded_ai import CascadeEvaluator
+from grounded_ai.backends.jev import HALLUCINATION, ChoiceQuestion, JevInput
+
+cascade = CascadeEvaluator(
+    jev="jev",                                      # or "jev/jev-latest" for hosted Jev
+    jev_kwargs={"use_local_model": True},           # the numbers below are from the local model
+    judge="anthropic/claude-haiku-4-5-20251001",    # any Evaluator model string, or an Evaluator
+    min_confidence=0.9,
+)
+cascade.jev.warmup(port=8000)
+
+result = cascade.evaluate(JevInput(
+    state={"context": "Michael Collins remained in orbit in the Command Module while Armstrong and Aldrin walked on the Moon.",
+           "response": "Buzz Aldrin stayed in the orbiter while Neil went down alone."},
+    questions={
+        "verdict": HALLUCINATION,
+        "language": ChoiceQuestion(instructions="Which language is the response in?",
+                                   criteria={"english": "written in English", "french": "written in French"}),
+    },
+))
+result.escalated                    # ['verdict']: Jev said hallucination, but at confidence 0.73
+result.judged                       # ['verdict']: what the judge actually answered
+result.answers["language"].choice   # 'english', Jev's own answer at confidence 0.93
+result.answers["verdict"].answer    # 'hallucination', from the judge, with .reasoning
+result.jev                          # Jev's full answers, escalated ones included
+```
+
+- **What counts as unsure.** A choice or score answer uses its `confidence`. A yes/no answer has no confidence field because its probability is the uncertainty, so it is read as `|2p - 1|`, the same formula as a two-option choice.
+- **Why 0.9.** It is where TypeSafe's own examples act without confirmation. Measured on the local model (Strands Decider v19), on held-out short classification its answers at 0.9 or above were right about 95% of the time, against about 66% from 0.5 to 0.9. Those bands were measured on classification; on long documents the model is under-confident, so 0.9 escalates more than it needs to there. Measure on your own traffic.
+- **Score questions.** Strands Decider's authors report that on tasks it never trained on, a confidence gate works for choice questions and not for score questions. `always_escalate={"score"}` sends every score question to the judge.
+- **What the judge receives.** A `JevLeftover`, a custom evaluation input holding the state and the leftover questions with their options. Its answers are restricted to each question's own options or levels.
+- **Failures.** If Jev fails, you get its `EvaluationError`. If the judge fails (an error, an exception, or an answer that doesn't fit the schema), you still get every answer: the escalated ones stay as Jev gave them, `result.judged` is empty, and the error is in `result.judge_error`.
+- **Which judges work.** Any backend that fills a custom output schema: `openai/`, `anthropic/`, `bedrock/`, or `hf/` with `task="text-generation"`. The SLM backend, Hugging Face text-classification and a second JevEvaluator are refused at construction.
+
+`evaluate_async()` does the same with the backends' async clients.
 
 ### 8. Command Line and Agent Hooks
 
@@ -329,19 +383,19 @@ Options: `--base-url` (`decider/` only), `--region` (`bedrock/` only), and for t
 | :--- | :--- | :--- |
 | **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
 | **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
-| **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
+| **Anthropic** | ✅ | Structured outputs (`output_config`, GA in anthropic>=1). |
 | **Amazon Bedrock** | ✅ | Access Foundation Models via AWS Bedrock Converse API. |
 | **HuggingFace** | ✅ | Run any generic HF model locally. |
-| **Strands Decider** | ✅ | Local decision model over `/v1/systemone`: typed answers with measured confidence, no text generation. |
+| **Jev** | ✅ | Decision model over `/v1/systemone`, hosted by TypeSafe or local (Strands Decider): typed answers with measured confidence, no text generation. |
 | **Integrations** | 🏗️ **Planned** | LiteLLM |
 
 ## Backend Capabilities
 
-| Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace | Strands Decider |
+| Feature | Grounded AI SLM | OpenAI | Anthropic | Amazon Bedrock | HuggingFace | Jev |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **System Prompt Fallback** | ✅ `SYSTEM_PROMPT_BASE` | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ✅ `default` if None | ➖ no system message |
-| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `DeciderInput`: `state` or your own fields |
-| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 Fixed `DeciderOutput` (typed answers) |
+| **Input Formatting** | 🛠️ Specialized Jinja | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `formatted_prompt` | ✅ `JevInput`: `state` or your own fields |
+| **Schema Validation** | ⚡ Regex Parsing | 🔒 Native `response_format` | 🔒 Native `json_schema` | 🔒 Native `json_schema` | ⚡ Generic Injection | 🔒 Fixed `JevOutput` (typed answers) |
 
 ## API Reference
 
@@ -349,9 +403,10 @@ Options: `--base-url` (`decider/` only), `--region` (`bedrock/` only), and for t
 
 ```python
 Evaluator(
-    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/...", "decider/..."
+    model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/...", "jev/..."
     eval_mode: str,  # Required for Grounded AI SLMs only ("TOXICITY", "HALLUCINATION", "RAG_RELEVANCE")
-    **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1)
+    **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1; Anthropic sends
+                     # temperature/top_p/top_k via extra_body, and newer Claude models reject them)
 )
 ```
 
@@ -375,27 +430,31 @@ class EvaluationOutput(BaseModel):
     reasoning: str     # Explanation
 ```
 
-### Decider backend
+### JevEvaluator
 
-The Decider backend has its own input and output (see [Decision Models](#7-decision-models-strands-decider)):
+JevEvaluator has its own input and output (see [Decision Models](#7-decision-models-jev)):
 
 ```python
-Evaluator("decider/<checkpoint>", base_url=None, api_key=None, timeout=30.0, input_schema=DeciderInput)
-evaluator.backend.warmup(port=8000, checkpoint=None, device=None, timeout=600.0, verbose=False)
+Evaluator("jev/<model>",                 # hosted: "jev-latest", "jev-preview" or a version like "jev-1.13.0"
+          use_local_model=False,         # True: Strands Decider on this machine
+          local_model="StrandsAgents/strands-decider-2B-hobson-v19",
+          base_url=None, api_key=None,   # hosted: TYPESAFE_API_BASE / TYPESAFE_API_KEY; local: DECIDER_BASE_URL
+          timeout=30.0, max_retries=2, input_schema=JevInput)
+evaluator.backend.warmup(port=8000, checkpoint=None, device=None, timeout=600.0, verbose=False)  # local only
 evaluator.backend.shutdown()
 
 evaluate(
-    DeciderInput(
+    JevInput(
         questions: Dict[str, NoulQuestion | ChoiceQuestion | ScoreQuestion],  # what the model is asked
         state: str | dict | list,                                             # what the model reads
     )
-) -> DeciderOutput | EvaluationError
+) -> JevOutput | EvaluationError
 
-class DeciderOutput(BaseModel):
+class JevOutput(BaseModel):
     answers: Dict[str, NoulAnswer | ChoiceAnswer | ScoreAnswer]  # one per question
-    model: str
+    model: str          # the versioned model that answered
     usage: Dict[str, int]
-    latency_ms: float
+    latency_ms: float   # local server only
 ```
 
 ## Contributing

@@ -4,15 +4,15 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-import grounded_ai.backends.decider as decider
+import grounded_ai.backends.jev as jev
 from grounded_ai import AsyncEvaluator, Evaluator
-from grounded_ai.backends.decider import (
+from grounded_ai.backends.jev import (
     HALLUCINATION,
     RAG_RELEVANCE,
     TOXICITY,
-    DeciderBackend,
-    DeciderInput,
-    DeciderOutput,
+    JevEvaluator,
+    JevInput,
+    JevOutput,
 )
 from grounded_ai.schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
@@ -65,14 +65,14 @@ def make_backend(seen=None, p=0.9, pick=0, health=HEALTH, health_calls=None, res
 
     transport = httpx.MockTransport(handler)
     client_kwargs = {"async_client": httpx.AsyncClient(transport=transport)} if async_ else {}
-    return DeciderBackend(model_name=model_name, client=httpx.Client(transport=transport), **client_kwargs, **kwargs)
+    return JevEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=transport), **client_kwargs, **kwargs)
 
 
 def ask(state="x", **fields):
-    return DeciderInput(questions={"verdict": HALLUCINATION}, state=state, **fields)
+    return JevInput(questions={"verdict": HALLUCINATION}, state=state, **fields)
 
 
-class RagInput(DeciderInput):
+class RagInput(JevInput):
     """A customized input: its own fields are what the model reads, in this order."""
 
     context: str
@@ -83,11 +83,10 @@ class TestContract:
     """The request is the input's state and questions; the output is the server's answers."""
 
     def test_factory_routing(self):
-        evaluator = Evaluator(f"decider/{MODEL}", base_url="http://127.0.0.1:8010/")
-        assert isinstance(evaluator.backend, DeciderBackend)
+        evaluator = Evaluator("jev", use_local_model=True, local_model=MODEL, base_url="http://127.0.0.1:8010/")
+        assert isinstance(evaluator.backend, JevEvaluator)
         assert evaluator.backend.model_name == MODEL
         assert evaluator.backend.base_url == "http://127.0.0.1:8010"
-        assert Evaluator("decider/my-org/decider/ckpt").backend.model_name == "my-org/decider/ckpt"
 
     def test_request_is_the_input(self):
         seen = []
@@ -113,25 +112,32 @@ class TestContract:
         ],
     )
     def test_shipped_questions(self, question, labels):
-        result = make_backend().evaluate(DeciderInput(state="x", questions={"verdict": question}))
+        result = make_backend().evaluate(JevInput(state="x", questions={"verdict": question}))
         assert set(result.answers["verdict"].probabilities) == labels
 
+    def test_rag_relevance_judges_a_retrieved_chunk_against_the_query(self):
+        """RAG relevance is about retrieval: is the retrieved context relevant to the query?
+        It is not about whether a generated response answers the query."""
+        text = " ".join([str(RAG_RELEVANCE.instructions), *RAG_RELEVANCE.criteria.values()]).lower()
+        assert "context" in text and "query" in text
+        assert "response" not in text
+
     def test_output_contract_cannot_be_replaced(self):
-        class Reshaped(DeciderOutput):
+        class Reshaped(JevOutput):
             answers: dict
 
         for schema in (EvaluationOutput, Reshaped):
             result = make_backend().evaluate(ask(), output_schema=schema)
             assert isinstance(result, EvaluationError)
             assert result.error_code == "INVALID_REQUEST"
-            assert "DeciderOutput" in result.message
+            assert "JevOutput" in result.message
         with pytest.raises(TypeError):
             make_backend(output_schema=EvaluationOutput)
 
-    def test_decider_classes_are_not_the_stock_ones(self):
-        assert not issubclass(DeciderInput, EvaluationInput)
-        assert not issubclass(DeciderOutput, EvaluationOutput)
-        assert set(DeciderInput.model_fields) == {"questions", "state"}
+    def test_jev_classes_are_not_the_stock_ones(self):
+        assert not issubclass(JevInput, EvaluationInput)
+        assert not issubclass(JevOutput, EvaluationOutput)
+        assert set(JevInput.model_fields) == {"questions", "state"}
         with pytest.raises(TypeError):
             make_backend(input_schema=EvaluationInput)
 
@@ -156,10 +162,10 @@ class TestContract:
 
 
 class TestEvaluatorKeywords:
-    """Evaluator.evaluate() builds the DeciderInput from keywords. (How inputs map onto the request
-    and how answers parse is covered in test_decider_contract.py.)"""
+    """Evaluator.evaluate() builds the JevInput from keywords. (How inputs map onto the request
+    and how answers parse is covered in test_jev_contract.py.)"""
 
-    def test_evaluator_takes_decider_fields_as_keywords(self):
+    def test_evaluator_takes_jev_fields_as_keywords(self):
         seen = []
         evaluator = Evaluator.__new__(Evaluator)
         evaluator.backend = make_backend(seen)
@@ -172,12 +178,12 @@ class TestEvaluatorKeywords:
         assert seen[1]["body"]["state"] == "Just the text."
         assert list(seen[1]["body"]["questions"]) == ["tone"]
 
-        # The stock input fields are not Decider fields.
+        # The stock input fields are not Jev fields.
         result = evaluator.evaluate(response="x", questions={"tone": TOXICITY})
         assert result.error_code == "INVALID_REQUEST"
         assert "response" in result.message
         with pytest.raises(ValidationError):
-            DeciderInput(response="x", questions={"tone": TOXICITY})
+            JevInput(response="x", questions={"tone": TOXICITY})
 
     def test_evaluator_with_a_custom_input_class(self):
         seen = []
@@ -206,7 +212,7 @@ class TestServer:
 
     @pytest.mark.parametrize("name", [MODEL, f"StrandsAgents/{MODEL}"])
     def test_served_name_or_checkpoint_accepted(self, name):
-        assert isinstance(make_backend(model_name=name).evaluate(ask()), DeciderOutput)
+        assert isinstance(make_backend(model_name=name).evaluate(ask()), JevOutput)
 
     def test_health_checked_once(self):
         calls = []
@@ -217,14 +223,14 @@ class TestServer:
 
     def test_server_without_health_is_not_blocked(self):
         backend = make_backend(health=None, model_name="anything")
-        assert isinstance(backend.evaluate(ask()), DeciderOutput)
+        assert isinstance(backend.evaluate(ask()), JevOutput)
 
     def test_long_input_warns(self):
         with pytest.warns(UserWarning, match="truncates"):  # /health says max_length=100
             make_backend().evaluate(ask("word " * 200))
 
     def test_connection_error(self):
-        backend = DeciderBackend(model_name=MODEL, base_url="http://127.0.0.1:9")
+        backend = JevEvaluator(use_local_model=True, local_model=MODEL, base_url="http://127.0.0.1:9")
         result = backend.evaluate(ask())
         assert result.error_code == "CONNECTION_ERROR"
 
@@ -271,7 +277,7 @@ class TestWarmup:
             body = json.loads(request.content)
             return httpx.Response(200, json={"answers": {n: answer(q) for n, q in body["questions"].items()}})
 
-        return DeciderBackend(model_name=model_name, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        return JevEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     def test_starts_the_server_on_the_port_and_waits(self, monkeypatch):
         up, started = set(), []
@@ -281,31 +287,31 @@ class TestWarmup:
             up.add(8123)  # ready by the next health check
             return started[-1]
 
-        monkeypatch.setattr(decider.shutil, "which", lambda name: "/usr/bin/strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", popen)
-        monkeypatch.setattr(decider.time, "sleep", lambda s: None)
+        monkeypatch.setattr(jev.shutil, "which", lambda name: "/usr/bin/strands-decider")
+        monkeypatch.setattr(jev.subprocess, "Popen", popen)
+        monkeypatch.setattr(jev.time, "sleep", lambda s: None)
 
         backend = self._backend(up)
         assert backend.warmup(port=8123, device="cpu") is backend
         assert started[0].command == [
             "/usr/bin/strands-decider", "serve", f"StrandsAgents/{MODEL}", "--port", "8123", "--device", "cpu"]
         assert backend.base_url == "http://127.0.0.1:8123"
-        assert isinstance(backend.evaluate(ask()), DeciderOutput)
+        assert isinstance(backend.evaluate(ask()), JevOutput)
 
         backend.shutdown()
         assert started[0].terminated
 
     def test_reuses_a_server_already_on_the_port(self, monkeypatch):
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda command, **kw: pytest.fail("should not start a server"))
+        monkeypatch.setattr(jev.subprocess, "Popen", lambda command, **kw: pytest.fail("should not start a server"))
         backend = self._backend({8000})
         backend.warmup(port=8000)
         assert backend.base_url == "http://127.0.0.1:8000"
 
     def test_checkpoint_argument_overrides_the_model_name(self, monkeypatch):
         up, started = set(), []
-        monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(c), up.add(8000), FakeServer(c))[2])
-        monkeypatch.setattr(decider.time, "sleep", lambda s: None)
+        monkeypatch.setattr(jev.shutil, "which", lambda name: "strands-decider")
+        monkeypatch.setattr(jev.subprocess, "Popen", lambda c, **kw: (started.append(c), up.add(8000), FakeServer(c))[2])
+        monkeypatch.setattr(jev.time, "sleep", lambda s: None)
         self._backend(up, model_name=MODEL).warmup(checkpoint="/models/hobson")
         assert started[0][:3] == ["strands-decider", "serve", "/models/hobson"]
 
@@ -314,8 +320,8 @@ class TestWarmup:
             stdout.write(b"OSError: checkpoint not found\n")  # what the server printed before dying
             return FakeServer(command, exits_with=1)
 
-        monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", popen)
+        monkeypatch.setattr(jev.shutil, "which", lambda name: "strands-decider")
+        monkeypatch.setattr(jev.subprocess, "Popen", popen)
         with pytest.raises(RuntimeError, match="exited with code 1(.|\n)*checkpoint not found"):
             self._backend(set()).warmup(port=8000)
 
@@ -327,26 +333,151 @@ class TestWarmup:
             up.add(8000)
             return FakeServer(command)
 
-        monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", popen)
-        monkeypatch.setattr(decider.time, "sleep", lambda s: None)
+        monkeypatch.setattr(jev.shutil, "which", lambda name: "strands-decider")
+        monkeypatch.setattr(jev.subprocess, "Popen", popen)
+        monkeypatch.setattr(jev.time, "sleep", lambda s: None)
         self._backend(up).warmup(port=8000)
         up.clear()
         self._backend(up).warmup(port=8000, verbose=True)
-        assert seen[0]["stdout"] is not None and seen[0]["stderr"] is decider.subprocess.STDOUT
+        assert seen[0]["stdout"] is not None and seen[0]["stderr"] is jev.subprocess.STDOUT
         assert seen[1] == {}  # verbose: the server writes straight to the terminal
 
     def test_missing_server_package(self, monkeypatch):
-        monkeypatch.setattr(decider.shutil, "which", lambda name: None)
-        with pytest.raises(ImportError, match="grounded-ai\\[decider\\]"):
+        monkeypatch.setattr(jev.shutil, "which", lambda name: None)
+        with pytest.raises(ImportError, match="grounded-ai\\[jev-local\\]"):
             self._backend(set()).warmup(port=8000)
 
     def test_times_out(self, monkeypatch):
         started = []
-        monkeypatch.setattr(decider.shutil, "which", lambda name: "strands-decider")
-        monkeypatch.setattr(decider.subprocess, "Popen", lambda c, **kw: (started.append(FakeServer(c)), started[-1])[1])
-        monkeypatch.setattr(decider.time, "sleep", lambda s: None)
+        monkeypatch.setattr(jev.shutil, "which", lambda name: "strands-decider")
+        monkeypatch.setattr(jev.subprocess, "Popen", lambda c, **kw: (started.append(FakeServer(c)), started[-1])[1])
+        monkeypatch.setattr(jev.time, "sleep", lambda s: None)
         with pytest.raises(TimeoutError):
             self._backend(set()).warmup(port=8000, timeout=0.05)
         assert started[0].terminated
 
+
+
+# --- Hosted Jev (the default) ----------------------------------------------------------------------
+
+
+def hosted(responses, seen=None, async_=False, **kwargs):
+    """A hosted JevEvaluator whose HTTP client replays `responses` (status, json) in order."""
+    queue = list(responses)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request)
+        status, body = queue.pop(0)
+        headers = body.pop("_headers", {}) if isinstance(body, dict) else {}
+        return httpx.Response(status, json=body, headers=headers)
+
+    transport = httpx.MockTransport(handler)
+    clients = {"client": httpx.Client(transport=transport)}
+    if async_:
+        clients["async_client"] = httpx.AsyncClient(transport=transport)
+    return JevEvaluator(api_key=kwargs.pop("api_key", "ts-key"), **clients, **kwargs)
+
+
+URGENT = {"is_urgent": {"type": "noul", "instructions": "Does this convey urgency?"}}
+OK = (200, {"model": "jev-1.13.0", "answers": {"is_urgent": {"type": "noul", "noul": 0.95}},
+            "usage": {"input_tokens": 296, "output_tokens": 20}})
+
+
+class TestHosted:
+    def test_calls_typesafe_with_the_model_and_a_bearer_key(self):
+        seen = []
+        result = hosted([OK], seen).evaluate(JevInput(state="Help! Payouts failing.", questions=URGENT))
+        assert isinstance(result, JevOutput) and result.answers["is_urgent"].noul == 0.95
+        assert result.model == "jev-1.13.0"
+        (request,) = seen  # no /health call: the hosted API resolves model names itself
+        assert str(request.url) == "https://api.typesafe.ai/v1/systemone"
+        assert request.headers["authorization"] == "Bearer ts-key"
+        assert json.loads(request.content) == {
+            "state": "Help! Payouts failing.", "model": "jev-latest", "questions": URGENT}
+
+    def test_factory_routes_jev_to_hosted(self, monkeypatch):
+        monkeypatch.setenv("TYPESAFE_API_KEY", "env-key")
+        assert Evaluator("jev").backend.model_name == "jev-latest"
+        backend = Evaluator("jev/jev-1.13.0").backend
+        assert (backend.model_name, backend.use_local_model) == ("jev-1.13.0", False)
+        assert backend._headers["Authorization"] == "Bearer env-key"
+
+    def test_base_url_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("TYPESAFE_API_BASE", "http://proxy.local/typesafe/")
+        assert JevEvaluator(api_key="k").base_url == "http://proxy.local/typesafe"
+
+    def test_a_missing_key_is_an_error_up_front(self, monkeypatch):
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="TYPESAFE_API_KEY.*use_local_model=True"):
+            JevEvaluator()
+
+    def test_local_mode_needs_no_key(self, monkeypatch):
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+        local = Evaluator("jev", use_local_model=True).backend
+        assert (local.model_name, local.base_url) == (jev.DEFAULT_LOCAL_MODEL, "http://127.0.0.1:8000")
+
+    def test_warmup_is_for_local_mode_only(self):
+        with pytest.raises(ValueError, match="use_local_model=True"):
+            hosted([]).warmup(port=8000)
+
+    @pytest.mark.parametrize("status", [429, 529])
+    def test_rate_limits_and_overload_are_retried(self, monkeypatch, status):
+        waits = []
+        monkeypatch.setattr(jev.time, "sleep", waits.append)
+        busy = (status, {"detail": "slow down", "_headers": {"retry-after": "2"}})
+        result = hosted([busy, (status, {"detail": "slow down"}), OK]).evaluate(
+            JevInput(state="x", questions=URGENT))
+        assert isinstance(result, JevOutput)
+        assert waits == [2.0, 1.0]  # retry-after when given, else backoff
+
+    def test_gives_up_after_max_retries(self, monkeypatch):
+        monkeypatch.setattr(jev.time, "sleep", lambda s: None)
+        busy = (429, {"detail": "Rate limit exceeded"})
+        seen = []
+        result = hosted([busy] * 3, seen, max_retries=2).evaluate(JevInput(state="x", questions=URGENT))
+        assert (result.error_code, result.message, len(seen)) == ("429", "Rate limit exceeded", 3)
+
+    def test_other_errors_are_not_retried(self):
+        seen = []
+        result = hosted([(401, {"detail": "Invalid API key"})], seen).evaluate(JevInput(state="x", questions=URGENT))
+        assert (result.error_code, len(seen)) == ("401", 1)
+
+    @pytest.mark.asyncio
+    async def test_async_retries_too(self, monkeypatch):
+        waits = []
+
+        async def sleep(s):
+            waits.append(s)
+
+        monkeypatch.setattr(jev.asyncio, "sleep", sleep)
+        result = await hosted([(529, {"detail": "overloaded"}), OK], async_=True).evaluate_async(
+            JevInput(state="x", questions=URGENT))
+        assert isinstance(result, JevOutput) and waits == [0.5]
+
+
+
+class TestReviewFindings:
+    @pytest.mark.parametrize("header", ["-1", "nan", "inf"])
+    def test_a_bad_retry_after_still_retries(self, monkeypatch, header):
+        waits = []
+        monkeypatch.setattr(jev.time, "sleep", waits.append)
+        busy = (429, {"detail": "slow down", "_headers": {"retry-after": header}})
+        result = hosted([busy, OK]).evaluate(JevInput(state="x", questions=URGENT))
+        assert isinstance(result, JevOutput)
+        assert len(waits) == 1 and 0 <= waits[0] <= 30
+
+    def test_negative_max_retries_is_refused(self):
+        with pytest.raises(ValueError, match="max_retries"):
+            JevEvaluator(api_key="k", max_retries=-1)
+
+    def test_missing_questions_is_an_evaluation_error_not_a_crash(self):
+        evaluator = Evaluator("jev", api_key="k")
+        for result in (evaluator.evaluate(state="s"), evaluator.evaluate({"state": "s"})):
+            assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"
+            assert "questions" in result.message
+
+    @pytest.mark.asyncio
+    async def test_missing_questions_async(self):
+        result = await AsyncEvaluator("jev", api_key="k").evaluate(state="s")
+        assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"

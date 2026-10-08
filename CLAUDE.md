@@ -1,6 +1,6 @@
 # grounded-ai
 
-Universal evaluation interface for LLM application outputs. Single `Evaluator` factory routes to backends: Grounded AI SLM (local fine-tuned Phi-4), OpenAI, Anthropic, AWS Bedrock, HuggingFace, Strands Decider (local decision model over HTTP). Includes an OTel trace converter for evaluating agent traces.
+Universal evaluation interface for LLM application outputs. Single `Evaluator` factory routes to backends: Grounded AI SLM (local fine-tuned Phi-4), OpenAI, Anthropic, AWS Bedrock, HuggingFace, Jev (TypeSafe's hosted decision model, or Strands Decider locally with `use_local_model=True`). Includes an OTel trace converter for evaluating agent traces.
 
 ## Project Layout
 
@@ -9,12 +9,13 @@ grounded_ai/
   __init__.py          # Evaluator factory + public API
   base.py              # BaseEvaluator ABC
   schemas.py           # EvaluationInput, EvaluationOutput, EvaluationError
+  cascade.py           # CascadeEvaluator: Jev first, an LLM judge for what it is unsure of (JevLeftover -> JudgedAnswer)
   backends/
     openai.py
     anthropic.py
     bedrock.py
     huggingface.py
-    decider.py         # /v1/systemone client: DeciderInput (state + questions) -> DeciderOutput (answers); warmup() starts the server
+    jev.py             # JevEvaluator, /v1/systemone client: JevInput -> JevOutput; hosted Jev, or use_local_model=True for Strands Decider (warmup() starts it)
     grounded_ai_slm/
       backend.py       # PEFT adapter loading, prompt formatting, XML parsing
       prompts.py       # Jinja2 templates for TOXICITY / RAG_RELEVANCE / HALLUCINATION
@@ -61,16 +62,14 @@ Every install pulls all three SDKs unconditionally. These should be optional ext
 **5. License mismatch**
 README badge says MIT. `pyproject.toml` classifier says `Apache Software License`. Pick one and make it consistent everywhere.
 
-**6. `requires-python = ">=3.8"` is unvalidated**
-CI matrix only tests 3.10, 3.11, 3.12. Either test 3.8/3.9 or narrow the declared minimum.
+**6. ~~`requires-python = ">=3.8"` is unvalidated~~** Fixed: the floor is 3.10 (anthropic 1.x and strands-decider need it) and CI tests 3.10–3.13.
 
 ### P2 — Code quality
 
 **7. `_enforce_strict_schema` is copy-pasted** (`backends/anthropic.py` and `backends/bedrock.py`)
 The bedrock version is more complete — it also handles `$defs`, `definitions`, and arrays. The anthropic version misses those cases. Extract to a shared utility in `grounded_ai/utils.py` or similar.
 
-**8. Hardcoded Anthropic beta string** (`backends/anthropic.py:104`)
-`betas=["structured-outputs-2025-11-13"]` — date-stamped beta identifiers get removed when a feature graduates to stable. When that happens, every Anthropic evaluation call will break with a confusing API error.
+**8. ~~Hardcoded Anthropic beta string~~** Fixed: structured outputs are GA; the backend uses `messages.create(output_config=...)` and `messages.parse(output_format=...)` with no beta header (anthropic>=1).
 
 **9. HuggingFace text-generation path is broken for eval purposes** (`backends/huggingface.py:164-170`)
 The default `EvaluationOutput` path always returns `score=0.0`, `confidence=0.0`, `label="generated_text"`. It stuffs the raw generation into `reasoning`. This is only meaningful if the caller uses a custom output schema, but the README doesn't make that caveat clear. `text-classification` (Prompt Guard) works correctly.

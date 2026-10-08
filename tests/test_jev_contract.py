@@ -1,7 +1,7 @@
 """
-The Decider backend's contract, both directions:
+JevEvaluator's contract, both directions:
 
-- Input: a variety of DeciderInput shapes must map onto the `/v1/systemone` request exactly.
+- Input: a variety of JevInput shapes must map onto the `/v1/systemone` request exactly.
 - Output: a variety of server responses must parse into the right answer fields, and anything
   that does not answer what was asked must be refused.
 
@@ -18,12 +18,12 @@ import httpx
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from grounded_ai.backends.decider import (
+from grounded_ai.backends.jev import (
     ChoiceAnswer,
     ChoiceQuestion,
-    DeciderBackend,
-    DeciderInput,
-    DeciderOutput,
+    JevEvaluator,
+    JevInput,
+    JevOutput,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
@@ -71,13 +71,13 @@ def backend(seen=None, answers=None, body=None):
         reply = answers if answers is not None else {n: default_answer(q) for n, q in sent["questions"].items()}
         return httpx.Response(200, json={"model": MODEL, "answers": reply, "usage": {"input_tokens": 9, "output_tokens": len(reply)}})
 
-    return DeciderBackend(model_name=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    return JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
 
 def sent_body(input_data):
     seen = []
     result = backend(seen).evaluate(input_data)
-    assert isinstance(result, DeciderOutput), result
+    assert isinstance(result, JevOutput), result
     (body,) = seen
     if server_schema is not None:  # the real server must accept exactly what we send
         server_schema.SystemOneRequest(**body)
@@ -145,15 +145,74 @@ QUESTIONS = [
 ]
 
 
+# Hosted Jev accepts structured descriptions everywhere, and null for a choice option with no
+# detail (docs.typesafe.ai/api). The local server (strands-decider 0.1.0) takes text criteria only.
+STRUCTURED_CRITERIA = [
+    pytest.param(
+        ChoiceQuestion(instructions="Which team?", criteria={"billing": None, "bug": "defects"}),
+        {"type": "choice", "instructions": "Which team?", "criteria": {"billing": None, "bug": "defects"}},
+        id="choice-null-description",
+    ),
+    pytest.param(
+        ChoiceQuestion(instructions="Which team?", criteria={"billing": {"covers": ["refunds", "invoices"]}, "bug": ["crash", "error"]}),
+        {"type": "choice", "instructions": "Which team?", "criteria": {"billing": {"covers": ["refunds", "invoices"]}, "bug": ["crash", "error"]}},
+        id="choice-structured-descriptions",
+    ),
+    pytest.param(
+        NoulQuestion(instructions="Urgent?", criteria={"true": {"signal": "deadline"}, "false": ["no deadline"]}),
+        {"type": "noul", "instructions": "Urgent?", "criteria": {"true": {"signal": "deadline"}, "false": ["no deadline"]}},
+        id="noul-structured-criteria",
+    ),
+    pytest.param(
+        ScoreQuestion(instructions="How severe?", criteria=[{"level": "minor"}, {"level": "major"}]),
+        {"type": "score", "instructions": "How severe?", "criteria": [{"level": "minor"}, {"level": "major"}]},
+        id="score-structured-levels",
+    ),
+]
+
+
+def hosted_body(input_data):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        seen.append(sent)
+        answers = {n: default_answer(q) for n, q in sent["questions"].items()}
+        return httpx.Response(200, json={"model": "jev-1.13.0", "answers": answers})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = JevEvaluator(api_key="k", client=client).evaluate(input_data)
+    assert isinstance(result, JevOutput), result
+    (body,) = seen
+    return body
+
+
+@pytest.mark.parametrize("question,wire", STRUCTURED_CRITERIA)
+def test_hosted_jev_sends_structured_criteria(question, wire):
+    body = hosted_body(JevInput(state="x", questions={"q": question}))
+    assert body == {"state": "x", "model": "jev-latest", "questions": {"q": wire}}
+
+
+@pytest.mark.parametrize("question,wire", STRUCTURED_CRITERIA)
+def test_the_local_model_refuses_structured_criteria(question, wire):
+    seen = []
+    result = backend(seen).evaluate(JevInput(state="x", questions={"q": question}))
+    assert result.error_code == "INVALID_REQUEST" and "use_local_model=False" in result.message
+    assert seen == []
+    if server_schema is not None:  # the reason: the local server rejects them too
+        with pytest.raises(ValidationError):
+            server_schema.SystemOneRequest(state="x", questions={"q": wire})
+
+
 @pytest.mark.parametrize("question,wire", QUESTIONS)
 def test_question_maps_to_the_wire(question, wire):
-    body = sent_body(DeciderInput(state="x", questions={"q": question}))
+    body = sent_body(JevInput(state="x", questions={"q": question}))
     assert body == {"state": "x", "model": MODEL, "questions": {"q": wire}}
 
 
 @pytest.mark.parametrize("question,wire", QUESTIONS)
 def test_question_given_as_a_dict_maps_the_same(question, wire):
-    body = sent_body(DeciderInput(state="x", questions={"q": wire}))
+    body = sent_body(JevInput(state="x", questions={"q": wire}))
     assert body["questions"] == {"q": wire}
 
 
@@ -164,7 +223,7 @@ def test_many_questions_keep_their_names_and_order():
         "a score": ScoreQuestion(instructions="C?", criteria=["low", "high"]),
         "mixed": {"type": "noul", "instructions": "D."},
     }
-    body = sent_body(DeciderInput(state="x", questions=questions))
+    body = sent_body(JevInput(state="x", questions=questions))
     assert list(body["questions"]) == list(questions)
     assert [q["type"] for q in body["questions"].values()] == ["noul", "choice", "score", "noul"]
 
@@ -180,7 +239,6 @@ BAD_QUESTIONS = [
     pytest.param({"q": {"type": "choice", "instructions": "Q?", "criteria": {"only": ""}}}, id="choice-one-option"),
     pytest.param({"q": {"type": "choice", "instructions": "Q?", "criteria": ["a", "b"]}}, id="choice-criteria-as-list"),
     pytest.param({"q": {"type": "choice", "instructions": "Q?", "criteria": {str(i): "" for i in range(256)}}}, id="choice-256-options"),
-    pytest.param({"q": {"type": "choice", "instructions": "Q?", "criteria": {"a": None, "b": ""}}}, id="choice-null-description"),
     pytest.param({"q": {"type": "score", "instructions": "Q?", "criteria": ["only"]}}, id="score-one-level"),
     pytest.param({"q": {"type": "score", "instructions": "Q?", "criteria": [str(i) for i in range(11)]}}, id="score-eleven-levels"),
     pytest.param({"q": {"type": "score", "instructions": "Q?", "criteria": {"low": "", "high": ""}}}, id="score-criteria-as-dict"),
@@ -190,12 +248,12 @@ BAD_QUESTIONS = [
 @pytest.mark.parametrize("questions", BAD_QUESTIONS)
 def test_bad_questions_are_refused_by_the_input_class(questions):
     with pytest.raises(ValidationError):
-        DeciderInput(state="x", questions=questions)
+        JevInput(state="x", questions=questions)
 
 
 @pytest.mark.parametrize("questions", BAD_QUESTIONS)
 def test_bad_questions_never_reach_the_server_even_from_a_loose_subclass(questions):
-    class Loose(DeciderInput):
+    class Loose(JevInput):
         questions: dict
 
     seen = []
@@ -221,7 +279,7 @@ STATES = [
 
 @pytest.mark.parametrize("state", STATES)
 def test_state_is_sent_as_given(state):
-    body = sent_body(DeciderInput(state=state, questions={"q": NoulQuestion(instructions="Q.")}))
+    body = sent_body(JevInput(state=state, questions={"q": NoulQuestion(instructions="Q.")}))
     assert body["state"] == state
 
 
@@ -235,7 +293,7 @@ class Customer(BaseModel):
     tier: Tier
 
 
-class Ticket(DeciderInput):
+class Ticket(JevInput):
     """A customized input with one field of each kind people are likely to add."""
 
     customer: Customer
@@ -278,7 +336,7 @@ def test_subclass_fields_map_to_a_json_object_state():
     ],
 )
 def test_build_state_override_is_what_is_sent(rendered):
-    class Custom(DeciderInput):
+    class Custom(JevInput):
         text: str
 
         def build_state(self):
@@ -289,7 +347,7 @@ def test_build_state_override_is_what_is_sent(rendered):
 
 
 def test_explicit_state_wins_over_subclass_fields():
-    class Turn(DeciderInput):
+    class Turn(JevInput):
         message: str
 
     body = sent_body(Turn(message="from the field", state="from state", questions={"q": NoulQuestion(instructions="Q.")}))
@@ -306,14 +364,14 @@ BAD_STATES = [
 @pytest.mark.parametrize("state", BAD_STATES)
 def test_empty_state_is_refused(state):
     seen = []
-    result = backend(seen).evaluate(DeciderInput(state=state, questions={"q": NoulQuestion(instructions="Q.")}))
+    result = backend(seen).evaluate(JevInput(state=state, questions={"q": NoulQuestion(instructions="Q.")}))
     assert result.error_code == "INVALID_REQUEST"
     assert seen == []
 
 
 @pytest.mark.parametrize("value", [42, 3.14, True, object()], ids=["int", "float", "bool", "object"])
 def test_build_state_returning_something_else_is_refused(value):
-    class Broken(DeciderInput):
+    class Broken(JevInput):
         def build_state(self):
             return value
 
@@ -324,7 +382,7 @@ def test_build_state_returning_something_else_is_refused(value):
 
 
 def test_the_request_has_exactly_the_contract_keys():
-    body = sent_body(DeciderInput(state="x", questions={"q": NoulQuestion(instructions="Q.")}))
+    body = sent_body(JevInput(state="x", questions={"q": NoulQuestion(instructions="Q.")}))
     assert set(body) == {"state", "questions", "model"}
 
 
@@ -336,7 +394,7 @@ SCORE = {"q": ScoreQuestion(instructions="Q?", criteria=["unclear", "partly clea
 
 
 def parse(questions, answers=None, body=None):
-    return backend(answers=answers, body=body).evaluate(DeciderInput(state="x", questions=questions))
+    return backend(answers=answers, body=body).evaluate(JevInput(state="x", questions=questions))
 
 
 @pytest.mark.parametrize("value", [0.0, 0.0731, 0.5, 1.0, 1, 0], ids=str)
@@ -499,5 +557,5 @@ def test_a_response_built_by_the_servers_types_parses(questions):
     answers = {n: default_answer(q) for n, q in wire.items()}
     body = server_schema.SystemOneResponse(model=MODEL, answers=answers, usage=server_schema.Usage(input_tokens=5, output_tokens=1)).model_dump()
     result = parse(questions, body=body)
-    assert isinstance(result, DeciderOutput), result
+    assert isinstance(result, JevOutput), result
     assert result.answers["q"].model_dump() == body["answers"]["q"]
