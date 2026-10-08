@@ -1,0 +1,25 @@
+{
+  "n": 200,
+  "sonnet": "bedrock/us.anthropic.claude-sonnet-4-6",
+  "jev": "jev/jev-latest",
+  "sonnet_alone": {
+    "accuracy": 0.675,
+    "seconds_per_check": 2.591291670214123,
+    "median_seconds": 2.3548590834834613,
+    "dollars_per_million": 7750.875
+  },
+  "cascade_0.7": {
+    "accuracy": 0.695,
+    "seconds_per_check": 1.2762477077150833,
+    "median_seconds": 0.19905722899420653,
+    "dollars_per_million": 2996.7417299999997,
+    "sent_to_sonnet": 0.365
+  },
+  "cascade_0.9": {
+    "accuracy": 0.685,
+    "seconds_per_check": 1.8380058299147641,
+    "median_seconds": 2.110345375011093,
+    "dollars_per_million": 4571.8617300000005,
+    "sent_to_sonnet": 0.56
+  }
+}
