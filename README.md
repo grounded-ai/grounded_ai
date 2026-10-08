@@ -320,6 +320,63 @@ result.jev                          # Jev's full answers, escalated ones include
 
 `evaluate_async()` does the same with the backends' async clients.
 
+### 9. Command Line and Agent Hooks
+
+`grounded-ai check` asks whether a response is supported by its context, with any evaluator model. It prints a JSON verdict and exits 0 when supported, 1 when not, and 2 on an error.
+
+```bash
+grounded-ai check --model bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0 \
+  --context @docs/refund-policy.md --query "How long do refunds take?" \
+  --response "Refunds arrive within 3 days."
+# {"faithful": false, "model": "...", "hallucination_probability": null, "reasoning": "The policy says 5-7 business days..."}
+```
+
+The response can also come on stdin (`echo "..." | grounded-ai check ...`). With a `jev/` model, `hallucination_probability` is Jev's probability of a hallucination (LLM judges give `reasoning` instead). The `grounded-ai/` SLM and `hf/` text-classification models answer in fixed formats and can't be used here.
+
+`grounded-ai hook` runs the same check as a **Stop hook** for Claude Code and Codex. When the agent finishes a turn, it checks the agent's final answer against the tool output from that turn (files read, commands run). If the answer is not supported, the agent is asked to re-check its claims before it stops. The hook:
+
+- never blocks twice in a row,
+- skips turns with no tool output (there is nothing to check against),
+- fails open: if the model is down or anything goes wrong, the agent stops normally and a warning goes to stderr.
+
+Each checked turn is one evaluator call, so pick a fast, cheap model: `jev/jev-latest` answers in a fraction of a second for $0.042 per 1M input tokens, or add `--local` to use a Strands Decider server on your machine.
+
+Claude Code, in `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grounded-ai hook --model anthropic/claude-haiku-4-5",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex, in `~/.codex/config.toml` (then trust the hook once with `/hooks`):
+
+```toml
+[features]
+hooks = true
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "grounded-ai hook --model openai/gpt-5-mini"
+timeout = 60
+statusMessage = "Checking the answer against tool output"
+```
+
+Options: `--base-url` and `--local` (`jev/` only), `--region` (`bedrock/` only), and for the hook `--max-context-chars` (default 20000; the most recent tool output is kept).
+
 ## Implementation Status
 
 | Backend | Status | Description |
