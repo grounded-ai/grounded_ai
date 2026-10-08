@@ -220,7 +220,7 @@ result.answers["area"].choice          # 'billing'
 result.answers["clarity"].score        # 1.3147 (between "partly clear" and "clear")
 ```
 
-The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they refer to "the response", "the context" and "the query", so name those in your state. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
+The result is always a `DeciderOutput` (`.answers`, plus the server's `.model`, `.usage` and `.latency_ms`). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they read named fields from the state: `HALLUCINATION` checks a `response` against its `context`, `TOXICITY` judges a `response`, and `RAG_RELEVANCE` judges whether a retrieved chunk in `context` contains information that can answer the `query` (a chunk on the right topic without the answer is `unrelated`). The SLM backend takes that chunk as `response`; on Decider it is `context`. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
 
 **Its own input and output.** `DeciderInput` and `DeciderOutput` are separate from `EvaluationInput` and `EvaluationOutput`, which describe a text-generating judge. `DeciderInput` has exactly two fields, `questions` and `state`, and `output_schema` cannot replace `DeciderOutput`.
 
