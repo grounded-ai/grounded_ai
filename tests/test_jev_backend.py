@@ -455,3 +455,29 @@ class TestHosted:
             JevInput(state="x", questions=URGENT))
         assert isinstance(result, JevOutput) and waits == [0.5]
 
+
+
+class TestReviewFindings:
+    @pytest.mark.parametrize("header", ["-1", "nan", "inf"])
+    def test_a_bad_retry_after_still_retries(self, monkeypatch, header):
+        waits = []
+        monkeypatch.setattr(jev.time, "sleep", waits.append)
+        busy = (429, {"detail": "slow down", "_headers": {"retry-after": header}})
+        result = hosted([busy, OK]).evaluate(JevInput(state="x", questions=URGENT))
+        assert isinstance(result, JevOutput)
+        assert len(waits) == 1 and 0 <= waits[0] <= 30
+
+    def test_negative_max_retries_is_refused(self):
+        with pytest.raises(ValueError, match="max_retries"):
+            JevEvaluator(api_key="k", max_retries=-1)
+
+    def test_missing_questions_is_an_evaluation_error_not_a_crash(self):
+        evaluator = Evaluator("jev", api_key="k")
+        for result in (evaluator.evaluate(state="s"), evaluator.evaluate({"state": "s"})):
+            assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"
+            assert "questions" in result.message
+
+    @pytest.mark.asyncio
+    async def test_missing_questions_async(self):
+        result = await AsyncEvaluator("jev", api_key="k").evaluate(state="s")
+        assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"

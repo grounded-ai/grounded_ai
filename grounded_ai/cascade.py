@@ -25,7 +25,7 @@ import json
 from typing import Any, Collection, Dict, List, Literal, Optional, Tuple, Type, Union
 
 from jinja2 import Template
-from pydantic import BaseModel, Field, TypeAdapter, computed_field, create_model
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, computed_field, create_model
 from typing_extensions import Annotated
 
 from .base import BaseEvaluator
@@ -104,6 +104,15 @@ def _as_text(content: Content) -> str:
     return content if isinstance(content, str) else json.dumps(content, indent=2, ensure_ascii=False)
 
 
+def _criteria_text(question: Question) -> Any:
+    """Criteria as the judge reads them: JSON descriptions and levels as JSON text, never Python repr."""
+    if question.criteria is None:
+        return None
+    if isinstance(question.criteria, dict):
+        return {k: None if v is None else _as_text(v) for k, v in question.criteria.items()}
+    return [_as_text(level) for level in question.criteria]
+
+
 class JevLeftover(BaseModel):
     """The custom evaluation input the judge receives: Jev's state and the questions it
     was not confident about. Like any custom input, the LLM backends read its `formatted_prompt`."""
@@ -115,7 +124,7 @@ class JevLeftover(BaseModel):
     @property
     def formatted_prompt(self) -> str:
         questions = [
-            (name, {"type": q.type, "instructions": _as_text(q.instructions), "criteria": q.criteria})
+            (name, {"type": q.type, "instructions": _as_text(q.instructions), "criteria": _criteria_text(q)})
             for name, q in self.questions.items()
         ]
         return _LEFTOVER_TEMPLATE.render(state=_as_text(self.state), questions=questions)
@@ -135,10 +144,16 @@ def _judge_schema(questions: Dict[str, Any]) -> Type[BaseModel]:
         if question.type == "noul":
             answer_type: Any = bool
         else:
-            answer_type = Literal[tuple(question.criteria)]  # choice: option names; score: levels
+            answer_type = Literal[tuple(_criteria_text(question))]  # choice: option names; score: levels as text
         fields[f"reasoning_{i}"] = (str, Field(description=f"Reasoning for question {i} ({name!r}), before its answer"))
         fields[f"answer_{i}"] = (answer_type, Field(description=name))
     return create_model("JudgedAnswers", **fields)
+
+
+def _input_error(e: ValidationError) -> EvaluationError:
+    from . import _input_error as report
+
+    return report(e)
 
 
 def _resolve_backend(target: Any, kwargs: Dict[str, Any]) -> BaseEvaluator:
@@ -260,7 +275,10 @@ class CascadeEvaluator:
     def evaluate(self, input_data: Any = None, **kwargs) -> Union[CascadeOutput, EvaluationError]:
         """Takes the same inputs as Evaluator("jev/...").evaluate(): a JevInput (or subclass),
         a dict, a bare string as the state, or keywords such as state= and questions=."""
-        input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        try:
+            input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        except ValidationError as e:
+            return _input_error(e)
         jev_output = self.jev.evaluate(input_data, **backend_kwargs)
         if isinstance(jev_output, EvaluationError):
             return jev_output
@@ -274,7 +292,10 @@ class CascadeEvaluator:
         return self._combine(jev_output, leftover, judged)
 
     async def evaluate_async(self, input_data: Any = None, **kwargs) -> Union[CascadeOutput, EvaluationError]:
-        input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        try:
+            input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        except ValidationError as e:
+            return _input_error(e)
         jev_output = await self.jev.evaluate_async(input_data, **backend_kwargs)
         if isinstance(jev_output, EvaluationError):
             return jev_output

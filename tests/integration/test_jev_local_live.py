@@ -1,5 +1,5 @@
 """
-Runs the Decider backend against a real `strands-decider serve` and a real checkpoint.
+Runs JevEvaluator's local mode against a real `strands-decider serve` and a real checkpoint.
 
 Skipped unless DECIDER_LIVE=1, because it downloads the checkpoint and loads a 2B model:
 

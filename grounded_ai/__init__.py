@@ -1,6 +1,6 @@
 from typing import Any, Dict, Type, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .base import BaseEvaluator
 from .otel import (
@@ -16,6 +16,11 @@ from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
 # Fields that belong to EvaluationInput construction vs. backend runtime kwargs
 _INPUT_FIELDS = {"response", "query", "context", "base_template"}
+
+
+def _input_error(e: ValidationError) -> EvaluationError:
+    """An input that cannot be built (e.g. a JevInput without questions) is reported, not raised."""
+    return EvaluationError(error_code="INVALID_REQUEST", message=str(e), details={"exception_type": "ValidationError"})
 
 
 def _prepare_input(
@@ -120,7 +125,10 @@ class Evaluator:
             **kwargs: Input fields (response, query, context, base_template) or backend
                       runtime args (temperature, max_tokens, etc.) forwarded to the backend.
         """
-        input_data, backend_kwargs = self._prepare_input(input_data, kwargs)
+        try:
+            input_data, backend_kwargs = self._prepare_input(input_data, kwargs)
+        except ValidationError as e:
+            return _input_error(e)
         return self.backend.evaluate(input_data, output_schema=output_schema, **backend_kwargs)
 
 class AsyncEvaluator(Evaluator):
@@ -151,7 +159,10 @@ class AsyncEvaluator(Evaluator):
         output_schema: Type[BaseModel] = None,
         **kwargs,
     ) -> Union[BaseModel, EvaluationError]:
-        input_data, backend_kwargs = self._prepare_input(input_data, kwargs)
+        try:
+            input_data, backend_kwargs = self._prepare_input(input_data, kwargs)
+        except ValidationError as e:
+            return _input_error(e)
         return await self.backend.evaluate_async(input_data, output_schema=output_schema, **backend_kwargs)
 
 

@@ -1,6 +1,7 @@
 import asyncio
 import atexit
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -244,6 +245,8 @@ class JevEvaluator(BaseEvaluator):
     ):
         if not (isinstance(input_schema, type) and issubclass(input_schema, JevInput)):
             raise TypeError("input_schema must be JevInput or a subclass of it.")
+        if max_retries < 0:
+            raise ValueError(f"max_retries must be 0 or more, got {max_retries}.")
         super().__init__(input_schema=input_schema, output_schema=JevOutput)
         if httpx is None:
             raise ImportError(
@@ -463,9 +466,12 @@ class JevEvaluator(BaseEvaluator):
         if response.status_code not in _RETRY_STATUSES or attempt >= self.max_retries:
             return None
         try:
-            return min(float(response.headers.get("retry-after", "")), 30.0)
-        except ValueError:
+            wait = float(response.headers.get("retry-after", ""))
+        except ValueError:  # missing, or an HTTP date
+            wait = math.nan
+        if not math.isfinite(wait) or wait < 0:
             return 0.5 * 2**attempt
+        return min(wait, 30.0)
 
     def _call_backend(
         self, input_data: BaseModel, output_schema: Type[BaseModel], **kwargs

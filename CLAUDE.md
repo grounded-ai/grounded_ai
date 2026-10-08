@@ -9,6 +9,7 @@ grounded_ai/
   __init__.py          # Evaluator factory + public API
   base.py              # BaseEvaluator ABC
   schemas.py           # EvaluationInput, EvaluationOutput, EvaluationError
+  cascade.py           # CascadeEvaluator: Jev first, an LLM judge for what it is unsure of (JevLeftover -> JudgedAnswer)
   backends/
     openai.py
     anthropic.py

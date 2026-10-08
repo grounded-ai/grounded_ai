@@ -161,6 +161,8 @@ print(result.score) # 0.99
 ```
 
 ### 7. Decision Models (Jev)
+> **2.0.0:** the Decider backend is now `JevEvaluator`. `"decider/<checkpoint>"` is `Evaluator("jev", use_local_model=True, local_model="<checkpoint>")`; `DeciderInput`/`DeciderOutput` are `JevInput`/`JevOutput`; the `[decider]` extra is `[jev-local]`. No aliases are kept.
+
 [Jev](https://docs.typesafe.ai) is TypeSafe's decision model. It answers typed questions with probabilities instead of generating text, so the output cannot leave the schema and `confidence` comes from the model's own distribution.
 
 `JevEvaluator` runs it in one of two places, with the same input and output:
@@ -200,7 +202,7 @@ print(result.model)           # the versioned model that answered, e.g. 'jev-1.1
 
 **Hosted.** Requests carry `Authorization: Bearer $TYPESAFE_API_KEY`. Rate-limited (429) and overloaded (529) responses are retried with backoff, honouring `retry-after` (`max_retries=2` by default). `TYPESAFE_API_BASE` (or `base_url=`) points at a proxy such as LiteLLM's TypeSafe pass-through.
 
-**Local.** `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. The server's output goes to a log file (pass `verbose=True` to see it). A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint in `local_model`. The local server takes question criteria as text only; structured (JSON) or `null` criteria need hosted Jev and are refused locally before anything is sent.
+**Local.** The same code runs locally by adding `use_local_model=True`; the hosted model name is then ignored and `local_model` picks the checkpoint. `warmup(port=8000, checkpoint=None, device=None)` runs `strands-decider serve` for you, waits for it, and points the evaluator at it. The server's output goes to a log file (pass `verbose=True` to see it). A server already on that port is reused; the one it starts stops with `evaluator.backend.shutdown()` or when Python exits. To run the server yourself instead, start `strands-decider serve <checkpoint> --port 8000` and pass `base_url=` (or set `DECIDER_BASE_URL`); the default is `http://127.0.0.1:8000`. Either way the first call checks that the server is running the checkpoint in `local_model`. The local server takes question criteria as text only; structured (JSON) or `null` criteria need hosted Jev and are refused locally before anything is sent.
 
 **The contract.** Every call takes a `JevInput`: a `state` (what the model reads) and named `questions` (what it is asked). It returns a `JevOutput`: one answer per question. Both sides are fixed classes that mirror the model:
 
@@ -232,7 +234,7 @@ result.answers["area"].choice          # 'billing'
 result.answers["clarity"].score        # 1.3147 (between "partly clear" and "clear")
 ```
 
-The result is always a `JevOutput` (`.answers`, plus `.model`, `.usage`, and `.latency_ms` from the local server). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they read named fields from the state: `HALLUCINATION` checks a `response` against its `context`, `TOXICITY` judges a `response`, and `RAG_RELEVANCE` judges whether a retrieved chunk in `context` contains information that can answer the `query` (a chunk on the right topic without the answer is `unrelated`). The SLM backend takes that chunk as `response`; on Decider it is `context`. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
+The result is always a `JevOutput` (`.answers`, plus `.model`, `.usage`, and `.latency_ms` from the local server). `HALLUCINATION`, `TOXICITY` and `RAG_RELEVANCE` are ready-made `ChoiceQuestion`s; they read named fields from the state: `HALLUCINATION` checks a `response` against its `context`, `TOXICITY` judges a `response`, and `RAG_RELEVANCE` judges whether a retrieved chunk in `context` contains information that can answer the `query` (a chunk on the right topic without the answer is `unrelated`). The SLM backend takes that chunk as `response`; on Jev it is `context`. There is no system message and nothing is sampled, so this backend takes no `system_prompt`, `temperature` or `eval_mode`.
 
 **Its own input and output.** `JevInput` and `JevOutput` are separate from `EvaluationInput` and `EvaluationOutput`, which describe a text-generating judge. `JevInput` has exactly two fields, `questions` and `state`, and `output_schema` cannot replace `JevOutput`.
 

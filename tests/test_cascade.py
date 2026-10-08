@@ -332,3 +332,28 @@ def test_judged_answer_is_not_a_measured_answer():
     assert {"answer", "reasoning", "question_type", "judge"} <= fields
     assert not fields & {"probabilities", "confidence", "noul", "score"}
     assert issubclass(JudgedAnswer, BaseModel)
+
+
+class TestStructuredCriteriaForTheJudge:
+    def test_json_criteria_reach_the_judge_as_json(self):
+        questions = {
+            "team": ChoiceQuestion(instructions="Which team?", criteria={"billing": {"covers": ["refunds"]}, "bug": None}),
+            "urgent": NoulQuestion(instructions="Urgent?", criteria={"true": {"signal": "deadline"}}),
+            "size": ScoreQuestion(instructions="How big?", criteria=[{"level": "small"}, {"level": "large"}]),
+        }
+        prompt = JevLeftover(state="x", questions=questions).formatted_prompt
+        assert "{'" not in prompt  # no Python repr
+        assert '"covers"' in prompt and '"signal"' in prompt and '"level": "small"' in prompt
+
+    def test_json_score_levels_make_a_usable_judge_schema(self):
+        from grounded_ai.cascade import _judge_schema
+
+        q = {"size": ScoreQuestion(instructions="How big?", criteria=[{"level": "small"}, {"level": "large"}])}
+        schema = _judge_schema(q)
+        answer = schema.model_json_schema()["properties"]["answer_0"]
+        assert all(isinstance(v, str) for v in answer["enum"])
+        schema(reasoning_0="r", answer_0=answer["enum"][1])  # a level the judge can actually return
+
+    def test_missing_questions_is_an_evaluation_error(self):
+        result = CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=FakeJudge()).evaluate(state="s")
+        assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"

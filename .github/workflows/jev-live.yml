@@ -64,6 +64,8 @@ jobs:
         pytest tests/integration -s -v | tee live-tests.txt
 
     - name: Run the example notebook
+      env:
+        TYPESAFE_API_KEY: ""  # the notebook picks hosted Jev when a key is set; this job tests the local model
       run: |
         jupyter nbconvert --to notebook --execute examples/backends/jev.ipynb \
           --output jev.executed.ipynb --output-dir executed --ExecutePreprocessor.timeout=1800
