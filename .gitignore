@@ -15,6 +15,7 @@ venv.bak/
 # Project specifics
 TODOs.md
 design.md
+CLAUDE.md
 .agent/
 .gemini/
 **/.DS_Store
