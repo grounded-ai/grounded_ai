@@ -14,9 +14,26 @@ except ImportError:
     AsyncAnthropic = None
 
 
+# anthropic 1.x dropped these from the SDK signatures, not from the API: they travel in extra_body.
+# Whether a model accepts them is the model's call (newer models reject them with a 400).
+_SAMPLING_ARGS = ("temperature", "top_p", "top_k")
+
+
+def _request_kwargs(defaults: dict, runtime: dict) -> dict:
+    """Init kwargs merged with runtime kwargs (runtime wins), with max_tokens defaulted and sampling
+    arguments moved into extra_body."""
+    request_kwargs = {**defaults, **runtime}
+    if request_kwargs.get("max_tokens") is None:  # required by the API; None would be sent as null
+        request_kwargs["max_tokens"] = 1024
+    sampling = {k: request_kwargs.pop(k) for k in _SAMPLING_ARGS if k in request_kwargs}
+    if sampling:
+        request_kwargs["extra_body"] = {**(request_kwargs.get("extra_body") or {}), **sampling}
+    return request_kwargs
+
+
 class AnthropicBackend(BaseEvaluator):
     """
-    Anthropic backend using the 'structured-outputs' beta feature.
+    Anthropic backend using structured outputs (`output_config.format`, GA in anthropic>=1).
     """
 
     def __init__(
@@ -96,21 +113,13 @@ class AnthropicBackend(BaseEvaluator):
 
         json_schema = _enforce_strict_schema(json_schema)
 
-        # Merge init kwargs with runtime kwargs (runtime overrides init)
-        request_kwargs = {**self.kwargs, **kwargs}
-
-        # Ensure max_tokens is present (Required by Anthropic API)
-        if "max_tokens" not in request_kwargs:
-            request_kwargs["max_tokens"] = 1024
-
         try:
-            # Use Beta Structured Outputs
-            response = self.client.beta.messages.create(
+            request_kwargs = _request_kwargs(self.kwargs, kwargs)
+            response = self.client.messages.create(
                 model=self.model_name,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
-                betas=["structured-outputs-2025-11-13"],
-                output_format={"type": "json_schema", "schema": json_schema},
+                output_config={"format": {"type": "json_schema", "schema": json_schema}},
                 **request_kwargs,
             )
 
@@ -149,14 +158,11 @@ class AnthropicBackend(BaseEvaluator):
         else:
             user_content = str(input_data.model_dump())
 
-        request_kwargs = {**self.kwargs, **kwargs}
-        if "max_tokens" not in request_kwargs:
-            request_kwargs["max_tokens"] = 1024
-
         try:
-            # beta.messages.parse() accepts a Pydantic model directly via output_format,
+            request_kwargs = _request_kwargs(self.kwargs, kwargs)
+            # messages.parse() takes the Pydantic model itself as output_format,
             # so no manual schema manipulation is needed here.
-            response = await self.async_client.beta.messages.parse(
+            response = await self.async_client.messages.parse(
                 model=self.model_name,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_content}],
