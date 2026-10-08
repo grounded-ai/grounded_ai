@@ -15,14 +15,12 @@ uncertainty; it is read as |2p - 1|, which is the choice formula at two options.
 The default threshold, 0.9, is where TypeSafe's own examples act without confirmation. The bands
 behind it were measured on the local model, Strands Decider v19: on held-out short classification
 its answers at 0.9 or above were right 0.952 of the time, against 0.655 from 0.5 to 0.9; on long
-documents it is under-confident, so the same threshold escalates more than it needs to. Its
-authors also report that on tasks it never trained on, a confidence gate is useful for choice
-questions and not for score questions; `always_escalate={"score"}` sends every score question to
-the judge. Hosted Jev has not been measured here. Measure on your own traffic.
+documents it is under-confident, so the same threshold escalates more than it needs to.
+Measure on your own traffic.
 """
 
 import json
-from typing import Any, Collection, Dict, List, Literal, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
 from jinja2 import Template
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, computed_field, create_model
@@ -42,7 +40,6 @@ from .backends.jev import (
 from .schemas import EvaluationError
 
 _QUESTIONS = TypeAdapter(Dict[str, Question])
-_QUESTION_TYPES = {"noul", "choice", "score"}
 
 
 class JudgedAnswer(BaseModel):
@@ -200,7 +197,6 @@ class CascadeEvaluator:
 
     `jev` and `judge` take a model string, an Evaluator or a backend. `jev_kwargs` and
     `judge_kwargs` are passed to Evaluator when a model string is given (base_url, api_key, ...).
-    `always_escalate` names question types ("noul", "choice", "score") the judge always answers.
     """
 
     def __init__(
@@ -208,22 +204,17 @@ class CascadeEvaluator:
         jev: Any,
         judge: Any,
         min_confidence: float = 0.9,
-        always_escalate: Collection[str] = (),
         jev_kwargs: Optional[Dict[str, Any]] = None,
         judge_kwargs: Optional[Dict[str, Any]] = None,
     ):
         if not 0.0 <= min_confidence <= 1.0:
             raise ValueError(f"min_confidence must be in [0, 1], got {min_confidence!r}.")
-        unknown = set(always_escalate) - _QUESTION_TYPES
-        if unknown:
-            raise ValueError(f"always_escalate takes question types {sorted(_QUESTION_TYPES)}, got {sorted(unknown)}.")
         self.jev = _resolve_backend(jev, jev_kwargs or {})
         if not isinstance(self.jev, JevEvaluator):
             raise TypeError(f"The first stage must be a JevEvaluator, got {type(self.jev).__name__}.")
         self.judge = _resolve_backend(judge, judge_kwargs or {})
         _refuse_unusable_judge(self.judge)
         self.min_confidence = min_confidence
-        self.always_escalate = frozenset(always_escalate)
 
     # Shared by evaluate() and evaluate_async(): everything except the two backend calls.
 
@@ -242,8 +233,7 @@ class CascadeEvaluator:
         escalated = {
             name: question
             for name, question in questions.items()  # the order the questions were asked
-            if question.type in self.always_escalate
-            or _confidence(jev_output.answers[name]) < self.min_confidence
+            if _confidence(jev_output.answers[name]) < self.min_confidence
         }
         return JevLeftover(state=input_data.build_state(), questions=escalated) if escalated else None
 

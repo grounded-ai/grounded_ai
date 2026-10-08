@@ -262,14 +262,6 @@ class TestReviewFixes:
         with pytest.raises(TypeError, match="judge"):
             CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=HuggingFaceBackend())
 
-    def test_always_escalate_sends_a_question_type_to_the_judge_regardless_of_confidence(self):
-        """Score questions behind a confidence gate are not reliable on tasks the model never saw."""
-        judge = FakeJudge({"clarity": "clear"})
-        result = cascade(CONFIDENT, judge, always_escalate={"score"}).evaluate(ask(area=AREA, clarity=CLARITY))
-        assert result.escalated == ["clarity"]
-        with pytest.raises(ValueError):
-            cascade(CONFIDENT, always_escalate={"essay"})
-
     def test_object_instructions_keep_their_key_order_in_the_prompt(self):
         question = NoulQuestion(instructions={"rule": "ports must be 443", "claim": "it listens on 8080"})
         prompt = JevLeftover(state="x", questions={"q": question}).formatted_prompt
