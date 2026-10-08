@@ -2,7 +2,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Type, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .schemas import EvaluationError, EvaluationInput, EvaluationOutput
 
@@ -48,7 +48,14 @@ class BaseEvaluator(ABC):
             An instance of the effective output_schema or EvaluationError on failure.
         """
         if isinstance(input_data, dict):
-            input_data = self.input_schema(**input_data)
+            try:
+                input_data = self.input_schema(**input_data)
+            except ValidationError as e:  # reported like every other failure, not raised
+                return EvaluationError(
+                    error_code="INVALID_REQUEST",
+                    message=str(e),
+                    details={"exception_type": "ValidationError"},
+                )
         target_schema = output_schema or self.output_schema
         return self._call_backend(input_data, target_schema, **kwargs)
 
@@ -63,7 +70,14 @@ class BaseEvaluator(ABC):
         _call_backend_async; others fall back to running _call_backend in a thread pool.
         """
         if isinstance(input_data, dict):
-            input_data = self.input_schema(**input_data)
+            try:
+                input_data = self.input_schema(**input_data)
+            except ValidationError as e:  # reported like every other failure, not raised
+                return EvaluationError(
+                    error_code="INVALID_REQUEST",
+                    message=str(e),
+                    details={"exception_type": "ValidationError"},
+                )
         target_schema = output_schema or self.output_schema
         return await self._call_backend_async(input_data, target_schema, **kwargs)
 

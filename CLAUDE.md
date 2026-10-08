@@ -1,6 +1,6 @@
 # grounded-ai
 
-Universal evaluation interface for LLM application outputs. Single `Evaluator` factory routes to backends: Grounded AI SLM (local fine-tuned Phi-4), OpenAI, Anthropic, AWS Bedrock, HuggingFace, Strands Decider (local decision model over HTTP). Includes an OTel trace converter for evaluating agent traces.
+Universal evaluation interface for LLM application outputs. Single `Evaluator` factory routes to backends: Grounded AI SLM (local fine-tuned Phi-4), OpenAI, Anthropic, AWS Bedrock, HuggingFace, Jev (TypeSafe's hosted decision model, or Strands Decider locally with `use_local_model=True`). Includes an OTel trace converter for evaluating agent traces.
 
 ## Project Layout
 
@@ -9,12 +9,13 @@ grounded_ai/
   __init__.py          # Evaluator factory + public API
   base.py              # BaseEvaluator ABC
   schemas.py           # EvaluationInput, EvaluationOutput, EvaluationError
+  cascade.py           # CascadeEvaluator: Jev first, an LLM judge for what it is unsure of (JevLeftover -> JudgedAnswer)
   backends/
     openai.py
     anthropic.py
     bedrock.py
     huggingface.py
-    decider.py         # /v1/systemone client: DeciderInput (state + questions) -> DeciderOutput (answers); warmup() starts the server
+    jev.py             # JevEvaluator, /v1/systemone client: JevInput -> JevOutput; hosted Jev, or use_local_model=True for Strands Decider (warmup() starts it)
     grounded_ai_slm/
       backend.py       # PEFT adapter loading, prompt formatting, XML parsing
       prompts.py       # Jinja2 templates for TOXICITY / RAG_RELEVANCE / HALLUCINATION
