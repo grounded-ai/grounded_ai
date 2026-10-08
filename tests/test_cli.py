@@ -407,18 +407,18 @@ class TestHook:
 
 
 class TestMakeChecker:
-    def test_decider_models_ask_the_hallucination_question(self, monkeypatch):
+    def test_jev_models_ask_the_hallucination_question(self, monkeypatch):
         seen = {}
 
-        class FakeDecider:
+        class FakeJev:
             def evaluate(self, input_data):
-                from grounded_ai.backends.decider import ChoiceAnswer, DeciderOutput
+                from grounded_ai.backends.jev import ChoiceAnswer, JevOutput
 
                 seen["state"], seen["questions"] = (
                     input_data.state,
                     input_data.questions,
                 )
-                return DeciderOutput(
+                return JevOutput(
                     answers={
                         "verdict": ChoiceAnswer(
                             choice="hallucination",
@@ -428,8 +428,8 @@ class TestMakeChecker:
                     }
                 )
 
-        monkeypatch.setattr(cli, "_evaluator", lambda model, **kwargs: FakeDecider())
-        check = cli.make_checker("decider/StrandsAgents/strands-decider-2B-hobson-v19")
+        monkeypatch.setattr(cli, "_evaluator", lambda model, **kwargs: FakeJev())
+        check = cli.make_checker("jev/jev-latest")
         verdict = check(BAD, CONTEXT, "How long?")
         assert seen["state"] == {
             "context": CONTEXT,
@@ -498,7 +498,8 @@ class TestMakeChecker:
         "model, flags, message",
         [
             ("anthropic/claude-haiku-4-5", {"region": "us-east-1"}, "--region"),
-            ("decider/m", {"region": "us-east-1"}, "--region"),
+            ("jev/jev-latest", {"region": "us-east-1"}, "--region"),
+            ("anthropic/claude-haiku-4-5", {"local": True}, "--local"),
             ("anthropic/claude-haiku-4-5", {"base_url": "http://x"}, "--base-url"),
             ("bedrock/m", {"base_url": "http://x"}, "--base-url"),
         ],
@@ -517,10 +518,13 @@ class TestMakeChecker:
         monkeypatch.setattr(
             cli, "_evaluator", lambda model, **kwargs: seen.setdefault(model, kwargs)
         )
+        cli.make_checker("jev/jev-latest")
+        assert seen["jev/jev-latest"] == {}
+        seen.clear()
         cli.make_checker("bedrock/m", region="eu-west-1")
-        cli.make_checker("decider/m", base_url="http://localhost:9000")
+        cli.make_checker("jev/jev-latest", base_url="http://localhost:9000", local=True)
         assert seen["bedrock/m"]["region_name"] == "eu-west-1"
-        assert seen["decider/m"] == {"base_url": "http://localhost:9000"}
+        assert seen["jev/jev-latest"] == {"base_url": "http://localhost:9000", "use_local_model": True}
 
     def test_a_model_that_ignores_the_verdict_schema_raises(self, monkeypatch):
         from grounded_ai.schemas import EvaluationOutput

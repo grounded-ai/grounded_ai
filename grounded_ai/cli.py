@@ -14,7 +14,8 @@ Command line: a faithfulness check, and the same check as a Stop hook for coding
         error lets the agent stop, with a warning on stderr.
 
 MODEL is any Evaluator model string: "anthropic/...", "openai/...", "bedrock/...", "hf/...", or
-"decider/..." (a running strands-decider server; set DECIDER_BASE_URL or --base-url).
+"jev/..." (hosted Jev with TYPESAFE_API_KEY, or with --local a strands-decider server; set
+DECIDER_BASE_URL or --base-url).
 The grounded-ai/ SLM and hf/ text-classification models answer in fixed formats and cannot be used.
 """
 
@@ -40,7 +41,7 @@ DEFAULT_MAX_CONTEXT_CHARS = 20000
 class Verdict:
     faithful: bool
     model: str
-    hallucination_probability: Optional[float] = None  # decider/ models only
+    hallucination_probability: Optional[float] = None  # jev/ models only
     reasoning: Optional[str] = None  # LLM judges only
 
 
@@ -99,29 +100,34 @@ def _raise_on_error(result):
 
 
 def make_checker(
-    model: str, base_url: Optional[str] = None, region: Optional[str] = None
+    model: str, base_url: Optional[str] = None, region: Optional[str] = None, local: bool = False
 ) -> Callable[..., Verdict]:
     """A function (response, context, query) -> Verdict backed by `model`.
     Raises ValueError for a model or flag that cannot work, and RuntimeError when a check fails."""
     if model.startswith(_NO_VERDICT):
         raise ValueError(
-            f"{model} cannot give a faithfulness verdict; use a decider/ model or an LLM judge"
+            f"{model} cannot give a faithfulness verdict; use a jev/ model or an LLM judge"
         )
     if region and not model.startswith("bedrock/"):
         raise ValueError("--region only applies to bedrock/ models")
-    if base_url and not model.startswith("decider/"):
-        raise ValueError("--base-url only applies to decider/ models")
+    if base_url and not model.startswith("jev/"):
+        raise ValueError("--base-url only applies to jev/ models")
+    if local and not model.startswith("jev/"):
+        raise ValueError("--local only applies to jev/ models")
 
-    if model.startswith("decider/"):
-        from .backends.decider import HALLUCINATION, DeciderInput
+    if model.startswith("jev/"):
+        from .backends.jev import HALLUCINATION, JevInput
 
-        evaluator = _evaluator(model, **({"base_url": base_url} if base_url else {}))
+        kwargs = {"base_url": base_url} if base_url else {}
+        if local:
+            kwargs["use_local_model"] = True
+        evaluator = _evaluator(model, **kwargs)
 
         def check(response: str, context: str, query: Optional[str]) -> Verdict:
             state = {"context": context, "query": query, "response": response}
             result = _raise_on_error(
                 evaluator.evaluate(
-                    DeciderInput(
+                    JevInput(
                         state={k: v for k, v in state.items() if v is not None},
                         questions={"verdict": HALLUCINATION},
                     )
@@ -266,7 +272,7 @@ def _check(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
         )
         return 2
     try:
-        verdict = make_checker(args.model, base_url=args.base_url, region=args.region)(
+        verdict = make_checker(args.model, base_url=args.base_url, region=args.region, local=args.local)(
             response, context, args.query
         )
     except Exception as e:  # noqa: BLE001 - any model failure is reported, not raised
@@ -287,7 +293,7 @@ def _hook(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
         answer = event.get("last_assistant_message") or turn.answer
         if not answer or not turn.tool_outputs:
             return 0  # nothing to check, or no tool output to check it against
-        verdict = make_checker(args.model, base_url=args.base_url, region=args.region)(
+        verdict = make_checker(args.model, base_url=args.base_url, region=args.region, local=args.local)(
             answer, _evidence(turn.tool_outputs, args.max_context_chars), turn.query
         )
     except Exception as e:  # noqa: BLE001 - fail open: a broken check must never trap the agent
@@ -325,7 +331,8 @@ def _parser() -> argparse.ArgumentParser:
             required=True,
             help='Evaluator model string, e.g. "anthropic/claude-haiku-4-5"',
         )
-        p.add_argument("--base-url", help="Server URL (decider/ models)")
+        p.add_argument("--base-url", help="Server URL (jev/ models)")
+        p.add_argument("--local", action="store_true", help="jev/ models: run on the local Strands Decider server")
         p.add_argument("--region", help="AWS region (bedrock/ models)")
 
     check = sub.add_parser(
