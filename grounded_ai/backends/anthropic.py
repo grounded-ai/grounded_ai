@@ -22,10 +22,12 @@ _SAMPLING_ARGS = ("temperature", "top_p", "top_k")
 def _request_kwargs(defaults: dict, runtime: dict) -> dict:
     """Init kwargs merged with runtime kwargs (runtime wins), with max_tokens defaulted and sampling
     arguments moved into extra_body."""
-    request_kwargs = {"max_tokens": 1024, **defaults, **runtime}
+    request_kwargs = {**defaults, **runtime}
+    if request_kwargs.get("max_tokens") is None:  # required by the API; None would be sent as null
+        request_kwargs["max_tokens"] = 1024
     sampling = {k: request_kwargs.pop(k) for k in _SAMPLING_ARGS if k in request_kwargs}
     if sampling:
-        request_kwargs["extra_body"] = {**request_kwargs.get("extra_body", {}), **sampling}
+        request_kwargs["extra_body"] = {**(request_kwargs.get("extra_body") or {}), **sampling}
     return request_kwargs
 
 
@@ -111,9 +113,8 @@ class AnthropicBackend(BaseEvaluator):
 
         json_schema = _enforce_strict_schema(json_schema)
 
-        request_kwargs = _request_kwargs(self.kwargs, kwargs)
-
         try:
+            request_kwargs = _request_kwargs(self.kwargs, kwargs)
             response = self.client.messages.create(
                 model=self.model_name,
                 system=system_prompt,
@@ -157,9 +158,8 @@ class AnthropicBackend(BaseEvaluator):
         else:
             user_content = str(input_data.model_dump())
 
-        request_kwargs = _request_kwargs(self.kwargs, kwargs)
-
         try:
+            request_kwargs = _request_kwargs(self.kwargs, kwargs)
             # messages.parse() takes the Pydantic model itself as output_format,
             # so no manual schema manipulation is needed here.
             response = await self.async_client.messages.parse(

@@ -165,3 +165,26 @@ def test_sampling_args_travel_in_extra_body():
     assert "temperature" not in kwargs and "top_k" not in kwargs
     assert kwargs["extra_body"] == {"temperature": 0.0, "top_k": 5}
     assert kwargs["max_tokens"] == 300
+
+
+def test_extra_body_none_with_temperature_is_not_a_crash():
+    """extra_body=None must not blow up when sampling args are moved into it."""
+    client = MagicMock()
+    content = MagicMock()
+    content.text = json.dumps({"score": 0.5, "label": "x", "confidence": 0.5})
+    client.messages.create.return_value.content = [content]
+    backend = AnthropicBackend(model_name="claude-haiku-4-5", client=client)
+    result = backend.evaluate(EvaluationInput(response="r"), temperature=0.0, extra_body=None)
+    assert isinstance(result, EvaluationOutput)
+    _, kwargs = client.messages.create.call_args
+    assert kwargs["extra_body"] == {"temperature": 0.0}
+
+
+def test_max_tokens_none_falls_back_to_the_default():
+    client = MagicMock()
+    content = MagicMock()
+    content.text = json.dumps({"score": 0.5, "label": "x", "confidence": 0.5})
+    client.messages.create.return_value.content = [content]
+    AnthropicBackend(model_name="claude-haiku-4-5", client=client).evaluate(EvaluationInput(response="r"), max_tokens=None)
+    _, kwargs = client.messages.create.call_args
+    assert kwargs["max_tokens"] == 1024

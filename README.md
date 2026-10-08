@@ -272,7 +272,7 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 | :--- | :--- | :--- |
 | **Grounded AI SLM** | ✅ | specialized local models (Phi-4 based) for Hallucination, Toxicity, and RAG Relevance. |
 | **OpenAI** | ✅ | Uses `gpt-4o`/`mini` with strict Structured Outputs. |
-| **Anthropic** | ✅ | Uses `claude-4-5` series with Beta Structured Outputs. |
+| **Anthropic** | ✅ | Structured outputs (`output_config`, GA in anthropic>=1). |
 | **Amazon Bedrock** | ✅ | Access Foundation Models via AWS Bedrock Converse API. |
 | **HuggingFace** | ✅ | Run any generic HF model locally. |
 | **Strands Decider** | ✅ | Local decision model over `/v1/systemone`: typed answers with measured confidence, no text generation. |
@@ -294,7 +294,8 @@ On Apple Silicon, `strands-decider serve` (0.1.0) aborts when it receives concur
 Evaluator(
     model: str,      # e.g., "grounded-ai/...", "openai/...", "anthropic/...", "bedrock/...", "decider/..."
     eval_mode: str,  # Required for Grounded AI SLMs only ("TOXICITY", "HALLUCINATION", "RAG_RELEVANCE")
-    **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1)
+    **kwargs         # Backend-specific args (e.g. quantization=True, temperature=0.1; Anthropic sends
+                     # temperature/top_p/top_k via extra_body, and newer Claude models reject them)
 )
 ```
 

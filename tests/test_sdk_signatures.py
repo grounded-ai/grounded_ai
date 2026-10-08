@@ -24,9 +24,11 @@ def real(module_name):
     for k in saved:
         del sys.modules[k]
     try:
-        yield importlib.import_module(module_name)
-    except ImportError:
-        pytest.skip(f"{module_name} not installed")
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            pytest.skip(f"{module_name} not installed")
+        yield module  # an ImportError in the test body is a failure, not a skip
     finally:
         for k in [k for k in sys.modules if ours(k)]:
             del sys.modules[k]
