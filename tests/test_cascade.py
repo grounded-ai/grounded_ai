@@ -1,5 +1,5 @@
 """
-CascadeEvaluator: the Decider answers every question; the ones it is not confident about are
+CascadeEvaluator: Jev answers every question; the ones it is not confident about are
 forwarded, as a custom evaluation input, to an LLM judge.
 """
 
@@ -10,19 +10,19 @@ import pytest
 from pydantic import BaseModel
 
 from grounded_ai import CascadeEvaluator, Evaluator
-from grounded_ai.backends.decider import (
+from grounded_ai.backends.jev import (
     ChoiceAnswer,
     ChoiceQuestion,
-    DeciderBackend,
-    DeciderInput,
-    DeciderOutput,
+    JevEvaluator,
+    JevInput,
+    JevOutput,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
     ScoreQuestion,
 )
 from grounded_ai.base import BaseEvaluator
-from grounded_ai.cascade import CascadeOutput, DeciderLeftover, JudgedAnswer
+from grounded_ai.cascade import CascadeOutput, JevLeftover, JudgedAnswer
 from grounded_ai.schemas import EvaluationError, EvaluationOutput
 
 MODEL = "strands-decider-2B-hobson-v19"
@@ -45,7 +45,7 @@ UNSURE = {
 }
 
 
-def decider(answers, seen=None, status=200):
+def fake_jev(answers, seen=None, status=200):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
             return httpx.Response(404)
@@ -56,7 +56,7 @@ def decider(answers, seen=None, status=200):
             return httpx.Response(status, json={"detail": "boom"})
         return httpx.Response(200, json={"model": MODEL, "answers": {k: answers[k] for k in body["questions"]}})
 
-    return DeciderBackend(model_name=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)),
+    return JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)),
                           async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
@@ -82,11 +82,11 @@ class FakeJudge(BaseEvaluator):
 
 
 def cascade(answers, judge=None, **kwargs):
-    return CascadeEvaluator(decider=decider(answers), judge=judge or FakeJudge(), **kwargs)
+    return CascadeEvaluator(jev=fake_jev(answers), judge=judge or FakeJudge(), **kwargs)
 
 
 def ask(**questions):
-    return DeciderInput(state="You charged me twice and my account is overdrawn.", questions=questions)
+    return JevInput(state="You charged me twice and my account is overdrawn.", questions=questions)
 
 
 class TestRouting:
@@ -126,11 +126,11 @@ class TestRouting:
         judge = FakeJudge({"area": "billing"})
         assert cascade(at_threshold, judge, min_confidence=0.95).evaluate(ask(area=AREA)).escalated == ["area"]
 
-    def test_the_deciders_own_answers_are_kept_for_escalated_questions(self):
+    def test_jevs_own_answers_are_kept_for_escalated_questions(self):
         judge = FakeJudge({"area": "billing"})
         result = cascade({"area": UNSURE["area"]}, judge).evaluate(ask(area=AREA))
-        assert isinstance(result.decider, DeciderOutput)
-        assert result.decider.answers["area"] == ChoiceAnswer(**UNSURE["area"])
+        assert isinstance(result.jev, JevOutput)
+        assert result.jev.answers["area"] == ChoiceAnswer(**UNSURE["area"])
 
     def test_threshold_must_be_a_confidence(self):
         for bad in (-0.1, 1.5):
@@ -146,7 +146,7 @@ class TestWhatTheJudgeReceives:
         cascade({"area": UNSURE["area"], "urgent": CONFIDENT["urgent"]}, judge).evaluate(ask(area=AREA, urgent=URGENT))
 
         (input_data, _), = judge.calls
-        assert isinstance(input_data, DeciderLeftover)
+        assert isinstance(input_data, JevLeftover)
         assert input_data.state == "You charged me twice and my account is overdrawn."
         assert set(input_data.questions) == {"area"}
         prompt = input_data.formatted_prompt
@@ -172,7 +172,7 @@ class TestWhatTheJudgeReceives:
 
     def test_state_keeps_its_declared_order_in_the_prompt(self):
         """The evidence is declared before the text being judged; the judge must read it that way."""
-        leftover = DeciderLeftover(state={"policy": "Refunds within 30 days.", "answer": "You have 90 days."},  # reverse alphabetical
+        leftover = JevLeftover(state={"policy": "Refunds within 30 days.", "answer": "You have 90 days."},  # reverse alphabetical
                                    questions={"verdict": AREA})
         prompt = leftover.formatted_prompt
         assert prompt.index("Refunds within 30 days.") < prompt.index("You have 90 days.")
@@ -180,11 +180,11 @@ class TestWhatTheJudgeReceives:
     def test_question_names_need_not_be_identifiers(self):
         judge = FakeJudge({"which team?": "billing"})
         result = cascade({"which team?": UNSURE["area"]}, judge).evaluate(
-            DeciderInput(state="x", questions={"which team?": AREA}))
+            JevInput(state="x", questions={"which team?": AREA}))
         assert result.answers["which team?"].answer == "billing"
 
     def test_custom_input_classes_keep_their_state(self):
-        class Ticket(DeciderInput):
+        class Ticket(JevInput):
             customer: str
             body: str
 
@@ -195,11 +195,11 @@ class TestWhatTheJudgeReceives:
 
 
 class TestReviewFixes:
-    def test_importing_the_package_does_not_load_the_decider_backend(self):
+    def test_importing_the_package_does_not_load_the_jev_backend(self):
         import subprocess
         import sys
 
-        code = "import sys, grounded_ai; print('grounded_ai.backends.decider' in sys.modules)"
+        code = "import sys, grounded_ai; print('grounded_ai.backends.jev' in sys.modules)"
         out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
         assert out == "False"
         from grounded_ai import CascadeEvaluator as again  # still importable from the package
@@ -213,9 +213,9 @@ class TestReviewFixes:
             reply = {k: UNSURE[k] for k in reversed(list(body["questions"]))}  # server answers in another order
             return httpx.Response(200, json={"answers": reply})
 
-        backend = DeciderBackend(model_name=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        backend = JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
         judge = FakeJudge({"area": "billing", "urgent": True, "clarity": "clear"})
-        result = CascadeEvaluator(decider=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
+        result = CascadeEvaluator(jev=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
         assert result.escalated == ["area", "urgent", "clarity"]
 
     def test_judged_lists_what_the_judge_actually_answered(self):
@@ -226,7 +226,7 @@ class TestReviewFixes:
             ask(area=AREA, urgent=URGENT))
         assert (failed.escalated, failed.judged) == (["area"], [])
 
-    def test_a_judge_that_raises_keeps_the_decider_answers(self):
+    def test_a_judge_that_raises_keeps_the_jev_answers(self):
         class Raising(FakeJudge):
             def _call_backend(self, input_data, output_schema, **kwargs):
                 raise RuntimeError("CUDA out of memory")
@@ -248,22 +248,22 @@ class TestReviewFixes:
 
     def test_judges_that_cannot_honour_an_output_schema_are_refused(self):
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(decider=decider(CONFIDENT), judge=decider(CONFIDENT))
+            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=fake_jev(CONFIDENT))
 
         class GroundedAISLMBackend(FakeJudge):  # stands in for the SLM backend without loading torch
             pass
 
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(decider=decider(CONFIDENT), judge=GroundedAISLMBackend())
+            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=GroundedAISLMBackend())
 
         class HuggingFaceBackend(FakeJudge):
             task = "text-classification"
 
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(decider=decider(CONFIDENT), judge=HuggingFaceBackend())
+            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=HuggingFaceBackend())
 
     def test_always_escalate_sends_a_question_type_to_the_judge_regardless_of_confidence(self):
-        """Score questions behind a confidence gate are not reliable on tasks the Decider never saw."""
+        """Score questions behind a confidence gate are not reliable on tasks the model never saw."""
         judge = FakeJudge({"clarity": "clear"})
         result = cascade(CONFIDENT, judge, always_escalate={"score"}).evaluate(ask(area=AREA, clarity=CLARITY))
         assert result.escalated == ["clarity"]
@@ -272,20 +272,20 @@ class TestReviewFixes:
 
     def test_object_instructions_keep_their_key_order_in_the_prompt(self):
         question = NoulQuestion(instructions={"rule": "ports must be 443", "claim": "it listens on 8080"})
-        prompt = DeciderLeftover(state="x", questions={"q": question}).formatted_prompt
+        prompt = JevLeftover(state="x", questions={"q": question}).formatted_prompt
         assert prompt.index("ports must be 443") < prompt.index("it listens on 8080")
 
     def test_leftover_has_only_what_the_judge_needs(self):
-        assert set(DeciderLeftover.model_fields) == {"state", "questions"}
+        assert set(JevLeftover.model_fields) == {"state", "questions"}
 
 
 class TestFailures:
-    def test_decider_failure_is_returned(self):
-        result = CascadeEvaluator(decider=decider(CONFIDENT, status=500), judge=FakeJudge()).evaluate(ask(area=AREA))
+    def test_jev_failure_is_returned(self):
+        result = CascadeEvaluator(jev=fake_jev(CONFIDENT, status=500), judge=FakeJudge()).evaluate(ask(area=AREA))
         assert isinstance(result, EvaluationError)
         assert result.error_code == "500"
 
-    def test_judge_failure_keeps_the_decider_answers(self):
+    def test_judge_failure_keeps_the_jev_answers(self):
         boom = EvaluationError(error_code="429", message="rate limited")
         result = cascade({"area": UNSURE["area"], "urgent": CONFIDENT["urgent"]}, FakeJudge(error=boom)).evaluate(
             ask(area=AREA, urgent=URGENT))
@@ -298,18 +298,18 @@ class TestFailures:
 
 class TestConstruction:
     def test_from_model_strings(self):
-        evaluator = CascadeEvaluator(decider=f"decider/{MODEL}", judge="openai/gpt-4o-mini", judge_kwargs={"api_key": "k"})
-        assert isinstance(evaluator.decider, DeciderBackend)
-        assert evaluator.decider.model_name == MODEL
+        evaluator = CascadeEvaluator(jev="jev", jev_kwargs={"use_local_model": True, "local_model": MODEL}, judge="openai/gpt-4o-mini", judge_kwargs={"api_key": "k"})
+        assert isinstance(evaluator.jev, JevEvaluator)
+        assert evaluator.jev.model_name == MODEL
         assert evaluator.judge.model_name == "gpt-4o-mini"
 
     def test_from_evaluators(self):
-        evaluator = CascadeEvaluator(decider=Evaluator(f"decider/{MODEL}"), judge=FakeJudge())
-        assert isinstance(evaluator.decider, DeciderBackend)
+        evaluator = CascadeEvaluator(jev=Evaluator("jev", use_local_model=True, local_model=MODEL), judge=FakeJudge())
+        assert isinstance(evaluator.jev, JevEvaluator)
 
-    def test_first_stage_must_be_a_decider(self):
+    def test_first_stage_must_be_jev(self):
         with pytest.raises(TypeError):
-            CascadeEvaluator(decider=FakeJudge(), judge=FakeJudge())
+            CascadeEvaluator(jev=FakeJudge(), judge=FakeJudge())
 
     def test_keyword_inputs_like_evaluator(self):
         judge = FakeJudge()

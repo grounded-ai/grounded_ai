@@ -1,24 +1,24 @@
 """
 CascadeEvaluator: a decision model answers first; an LLM judge answers only what it was unsure of.
 
-The Decider answers every question in one cheap request, with measured probabilities. Each answer
+Jev answers every question in one cheap request, with measured probabilities. Each answer
 whose confidence is below `min_confidence` is escalated: the original state and just those leftover
-questions go to an LLM judge as a custom evaluation input (DeciderLeftover), in one call. Confident
-answers are returned as the Decider gave them; escalated ones come back as JudgedAnswer, which
+questions go to an LLM judge as a custom evaluation input (JevLeftover), in one call. Confident
+answers are returned as Jev gave them; escalated ones come back as JudgedAnswer, which
 carries the judge's pick and reasoning and no probabilities, because an LLM does not measure any.
 
-Confidence follows the Decider's own definitions. A choice or score answer has a `confidence`
-field (normalised max-probability for a choice, normalised spread for a score). A yes/no (noul)
-answer has none, because its probability is the uncertainty; it is read as |2p - 1|, which is the
-choice formula at two options.
+Confidence follows TypeSafe's definitions (docs.typesafe.ai/confidence), which Strands Decider
+shares. A choice or score answer has a `confidence` field (normalised max-probability for a choice,
+normalised spread for a score). A yes/no (noul) answer has none, because its probability is the
+uncertainty; it is read as |2p - 1|, which is the choice formula at two options.
 
-The default threshold, 0.9, is the top band of the Decider's routing convention: on held-out
-short classification, v19's answers at 0.9 or above were right 0.952 of the time, against 0.655
-from 0.5 to 0.9. Those bands were measured on classification; on long documents the model is
-under-confident, so the same threshold escalates more than it needs to. The Decider's authors also
-report that on tasks it never trained on, a confidence gate is useful for choice questions and not
-for score questions; `always_escalate={"score"}` sends every score question to the judge. Measure
-on your own traffic.
+The default threshold, 0.9, is where TypeSafe's own examples act without confirmation. The bands
+behind it were measured on the local model, Strands Decider v19: on held-out short classification
+its answers at 0.9 or above were right 0.952 of the time, against 0.655 from 0.5 to 0.9; on long
+documents it is under-confident, so the same threshold escalates more than it needs to. Its
+authors also report that on tasks it never trained on, a confidence gate is useful for choice
+questions and not for score questions; `always_escalate={"score"}` sends every score question to
+the judge. Hosted Jev has not been measured here. Measure on your own traffic.
 """
 
 import json
@@ -29,12 +29,12 @@ from pydantic import BaseModel, Field, TypeAdapter, computed_field, create_model
 from typing_extensions import Annotated
 
 from .base import BaseEvaluator
-from .backends.decider import (
+from .backends.jev import (
     ChoiceAnswer,
     Content,
-    DeciderBackend,
-    DeciderInput,
-    DeciderOutput,
+    JevEvaluator,
+    JevInput,
+    JevOutput,
     NoulAnswer,
     Question,
     ScoreAnswer,
@@ -46,11 +46,11 @@ _QUESTION_TYPES = {"noul", "choice", "score"}
 
 
 class JudgedAnswer(BaseModel):
-    """An answer the LLM judge gave for a question the Decider was not confident about.
+    """An answer the LLM judge gave for a question Jev was not confident about.
 
     It has the judge's pick and reasoning, and deliberately no probabilities or confidence. For a
-    score question `answer` is the level as written in the question (the Decider's ScoreAnswer gives
-    an index instead); the Decider's own answer is in CascadeOutput.decider.
+    score question `answer` is the level as written in the question (Jev's ScoreAnswer gives
+    an index instead); Jev's own answer is in CascadeOutput.jev.
     """
 
     type: Literal["judged"] = "judged"
@@ -64,14 +64,14 @@ CascadeAnswer = Annotated[Union[NoulAnswer, ChoiceAnswer, ScoreAnswer, JudgedAns
 
 
 class CascadeOutput(BaseModel):
-    """One answer per question: the Decider's where it was confident, the judge's where it was not."""
+    """One answer per question: Jev's where it was confident, the judge's where it was not."""
 
     answers: Dict[str, CascadeAnswer]
     escalated: List[str] = Field(description="Questions sent to the judge, in the order they were asked")
     judged: List[str] = Field(description="Escalated questions the judge answered; empty when it failed")
-    decider: DeciderOutput = Field(description="The Decider's full first-stage answers, escalated ones included")
+    jev: JevOutput = Field(description="Jev's full first-stage answers, escalated ones included")
     judge_error: Optional[EvaluationError] = Field(
-        None, description="Set when the judge failed; escalated questions then keep the Decider's answer"
+        None, description="Set when the judge failed; escalated questions then keep Jev's answer"
     )
 
 
@@ -104,8 +104,8 @@ def _as_text(content: Content) -> str:
     return content if isinstance(content, str) else json.dumps(content, indent=2, ensure_ascii=False)
 
 
-class DeciderLeftover(BaseModel):
-    """The custom evaluation input the judge receives: the Decider's state and the questions it
+class JevLeftover(BaseModel):
+    """The custom evaluation input the judge receives: Jev's state and the questions it
     was not confident about. Like any custom input, the LLM backends read its `formatted_prompt`."""
 
     state: Content
@@ -154,10 +154,10 @@ def _resolve_backend(target: Any, kwargs: Dict[str, Any]) -> BaseEvaluator:
 
 def _refuse_unusable_judge(judge: BaseEvaluator) -> None:
     """The judge must fill an arbitrary output schema from a formatted prompt. These backends cannot:
-    the Decider answers only its own contract, the SLM backend renders fixed prompts into a fixed
+    Jev answers only its own contract, the SLM backend renders fixed prompts into a fixed
     shape, and Hugging Face text-classification returns a label."""
     name = type(judge).__name__
-    if isinstance(judge, DeciderBackend) or name == "GroundedAISLMBackend" or (
+    if isinstance(judge, JevEvaluator) or name == "GroundedAISLMBackend" or (
         name == "HuggingFaceBackend" and getattr(judge, "task", None) == "text-classification"
     ):
         raise TypeError(
@@ -172,29 +172,29 @@ def _model_name(backend: BaseEvaluator) -> str:
 
 class CascadeEvaluator:
     """
-    Decider first, LLM judge for what it is unsure of.
+    Jev first, LLM judge for what it is unsure of.
 
         cascade = CascadeEvaluator(
-            decider="decider/StrandsAgents/strands-decider-2B-hobson-v19",
+            jev="jev/jev-latest",  # or "jev" with jev_kwargs={"use_local_model": True}
             judge="anthropic/claude-haiku-4-5-20251001",
             min_confidence=0.9,
         )
-        result = cascade.evaluate(DeciderInput(state=..., questions={...}))
-        result.answers["verdict"]   # the Decider's answer, or a JudgedAnswer
+        result = cascade.evaluate(JevInput(state=..., questions={...}))
+        result.answers["verdict"]   # Jev's answer, or a JudgedAnswer
         result.escalated            # which questions went to the judge
 
-    `decider` and `judge` take a model string, an Evaluator or a backend. `decider_kwargs` and
+    `jev` and `judge` take a model string, an Evaluator or a backend. `jev_kwargs` and
     `judge_kwargs` are passed to Evaluator when a model string is given (base_url, api_key, ...).
     `always_escalate` names question types ("noul", "choice", "score") the judge always answers.
     """
 
     def __init__(
         self,
-        decider: Any,
+        jev: Any,
         judge: Any,
         min_confidence: float = 0.9,
         always_escalate: Collection[str] = (),
-        decider_kwargs: Optional[Dict[str, Any]] = None,
+        jev_kwargs: Optional[Dict[str, Any]] = None,
         judge_kwargs: Optional[Dict[str, Any]] = None,
     ):
         if not 0.0 <= min_confidence <= 1.0:
@@ -202,9 +202,9 @@ class CascadeEvaluator:
         unknown = set(always_escalate) - _QUESTION_TYPES
         if unknown:
             raise ValueError(f"always_escalate takes question types {sorted(_QUESTION_TYPES)}, got {sorted(unknown)}.")
-        self.decider = _resolve_backend(decider, decider_kwargs or {})
-        if not isinstance(self.decider, DeciderBackend):
-            raise TypeError(f"The first stage must be a Decider backend, got {type(self.decider).__name__}.")
+        self.jev = _resolve_backend(jev, jev_kwargs or {})
+        if not isinstance(self.jev, JevEvaluator):
+            raise TypeError(f"The first stage must be a JevEvaluator, got {type(self.jev).__name__}.")
         self.judge = _resolve_backend(judge, judge_kwargs or {})
         _refuse_unusable_judge(self.judge)
         self.min_confidence = min_confidence
@@ -212,15 +212,15 @@ class CascadeEvaluator:
 
     # Shared by evaluate() and evaluate_async(): everything except the two backend calls.
 
-    def _decider_input(self, input_data: Any, kwargs: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+    def _jev_input(self, input_data: Any, kwargs: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
         from . import _prepare_input
 
-        input_data, backend_kwargs = _prepare_input(self.decider, input_data, kwargs)
+        input_data, backend_kwargs = _prepare_input(self.jev, input_data, kwargs)
         if isinstance(input_data, dict):
-            input_data = self.decider.input_schema(**input_data)
+            input_data = self.jev.input_schema(**input_data)
         return input_data, backend_kwargs
 
-    def _leftover(self, input_data: DeciderInput, decider_output: DeciderOutput) -> Optional[DeciderLeftover]:
+    def _leftover(self, input_data: JevInput, jev_output: JevOutput) -> Optional[JevLeftover]:
         questions = _QUESTIONS.validate_python(
             input_data.model_dump(include={"questions"}, exclude_none=True)["questions"]
         )
@@ -228,18 +228,18 @@ class CascadeEvaluator:
             name: question
             for name, question in questions.items()  # the order the questions were asked
             if question.type in self.always_escalate
-            or _confidence(decider_output.answers[name]) < self.min_confidence
+            or _confidence(jev_output.answers[name]) < self.min_confidence
         }
-        return DeciderLeftover(state=input_data.build_state(), questions=escalated) if escalated else None
+        return JevLeftover(state=input_data.build_state(), questions=escalated) if escalated else None
 
-    def _combine(self, decider_output: DeciderOutput, leftover: Optional[DeciderLeftover], judged: Any) -> CascadeOutput:
-        answers: Dict[str, Any] = dict(decider_output.answers)
+    def _combine(self, jev_output: JevOutput, leftover: Optional[JevLeftover], judged: Any) -> CascadeOutput:
+        answers: Dict[str, Any] = dict(jev_output.answers)
         escalated = list(leftover.questions) if leftover else []
         if leftover is None:
-            return CascadeOutput(answers=answers, escalated=[], judged=[], decider=decider_output)
+            return CascadeOutput(answers=answers, escalated=[], judged=[], jev=jev_output)
         if isinstance(judged, EvaluationError):
             return CascadeOutput(
-                answers=answers, escalated=escalated, judged=[], decider=decider_output, judge_error=judged
+                answers=answers, escalated=escalated, judged=[], jev=jev_output, judge_error=judged
             )
         try:
             judge = _model_name(self.judge)
@@ -252,40 +252,40 @@ class CascadeEvaluator:
                 )
         except Exception as e:  # the judge returned something other than the schema it was given
             return CascadeOutput(
-                answers=dict(decider_output.answers), escalated=escalated, judged=[],
-                decider=decider_output, judge_error=_judge_error(e),
+                answers=dict(jev_output.answers), escalated=escalated, judged=[],
+                jev=jev_output, judge_error=_judge_error(e),
             )
-        return CascadeOutput(answers=answers, escalated=escalated, judged=escalated, decider=decider_output)
+        return CascadeOutput(answers=answers, escalated=escalated, judged=escalated, jev=jev_output)
 
     def evaluate(self, input_data: Any = None, **kwargs) -> Union[CascadeOutput, EvaluationError]:
-        """Takes the same inputs as Evaluator("decider/...").evaluate(): a DeciderInput (or subclass),
+        """Takes the same inputs as Evaluator("jev/...").evaluate(): a JevInput (or subclass),
         a dict, a bare string as the state, or keywords such as state= and questions=."""
-        input_data, backend_kwargs = self._decider_input(input_data, kwargs)
-        decider_output = self.decider.evaluate(input_data, **backend_kwargs)
-        if isinstance(decider_output, EvaluationError):
-            return decider_output
-        leftover = self._leftover(input_data, decider_output)
+        input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        jev_output = self.jev.evaluate(input_data, **backend_kwargs)
+        if isinstance(jev_output, EvaluationError):
+            return jev_output
+        leftover = self._leftover(input_data, jev_output)
         judged = None
         if leftover is not None:
             try:
                 judged = self.judge.evaluate(leftover, output_schema=_judge_schema(leftover.questions))
             except Exception as e:  # some backends raise instead of returning EvaluationError
                 judged = _judge_error(e)
-        return self._combine(decider_output, leftover, judged)
+        return self._combine(jev_output, leftover, judged)
 
     async def evaluate_async(self, input_data: Any = None, **kwargs) -> Union[CascadeOutput, EvaluationError]:
-        input_data, backend_kwargs = self._decider_input(input_data, kwargs)
-        decider_output = await self.decider.evaluate_async(input_data, **backend_kwargs)
-        if isinstance(decider_output, EvaluationError):
-            return decider_output
-        leftover = self._leftover(input_data, decider_output)
+        input_data, backend_kwargs = self._jev_input(input_data, kwargs)
+        jev_output = await self.jev.evaluate_async(input_data, **backend_kwargs)
+        if isinstance(jev_output, EvaluationError):
+            return jev_output
+        leftover = self._leftover(input_data, jev_output)
         judged = None
         if leftover is not None:
             try:
                 judged = await self.judge.evaluate_async(leftover, output_schema=_judge_schema(leftover.questions))
             except Exception as e:
                 judged = _judge_error(e)
-        return self._combine(decider_output, leftover, judged)
+        return self._combine(jev_output, leftover, judged)
 
 
 def _judge_error(e: Exception) -> EvaluationError:

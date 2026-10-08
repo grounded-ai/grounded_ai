@@ -26,7 +26,7 @@ def _prepare_input(
     Splits kwargs into input-construction fields and backend runtime args.
     Returns (input_data, backend_kwargs).
     """
-    # A backend with its own input class (the Decider backend's DeciderInput) names the field
+    # A backend with its own input class (JevEvaluator's JevInput) names the field
     # a bare string goes into; every other backend takes the stock EvaluationInput.
     primary = getattr(backend, "primary_input_field", None)
     if primary:
@@ -89,14 +89,14 @@ class Evaluator:
 
             return BedrockBackend(model_id=model.replace("bedrock/", ""), **kwargs)
 
-        elif model.startswith("decider/"):
-            from .backends.decider import DeciderBackend
+        elif model == "jev" or model.startswith("jev/"):
+            from .backends.jev import JevEvaluator
 
-            return DeciderBackend(model_name=model[len("decider/"):], **kwargs)
+            return JevEvaluator(model_name=model[len("jev/"):] or "jev-latest", **kwargs)
 
         else:
             raise ValueError(
-                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/', 'decider/'."
+                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/', 'jev/'."
             )
 
     def _prepare_input(
@@ -156,12 +156,16 @@ class AsyncEvaluator(Evaluator):
 
 
 def __getattr__(name: str):
-    # CascadeEvaluator is imported on first use, so `import grounded_ai` does not load the Decider
-    # backend (see "Lazy backend imports" in CLAUDE.md).
+    # Imported on first use, so `import grounded_ai` does not load httpx or the Jev backend
+    # (see "Lazy backend imports" in CLAUDE.md).
     if name == "CascadeEvaluator":
         from .cascade import CascadeEvaluator
 
         return CascadeEvaluator
+    if name in ("JevEvaluator", "JevInput", "JevOutput"):
+        from .backends import jev
+
+        return getattr(jev, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -169,6 +173,9 @@ __all__ = [
     "Evaluator",
     "AsyncEvaluator",
     "CascadeEvaluator",
+    "JevEvaluator",
+    "JevInput",
+    "JevOutput",
     "EvaluationInput",
     "EvaluationOutput",
     "EvaluationError",

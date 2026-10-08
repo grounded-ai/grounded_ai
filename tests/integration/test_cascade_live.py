@@ -13,7 +13,7 @@ import os
 import pytest
 
 from grounded_ai import CascadeEvaluator
-from grounded_ai.backends.decider import HALLUCINATION, ChoiceQuestion, DeciderInput, NoulQuestion
+from grounded_ai.backends.jev import HALLUCINATION, ChoiceQuestion, JevInput, NoulQuestion
 from grounded_ai.cascade import CascadeOutput, JudgedAnswer
 
 pytestmark = pytest.mark.skipif(
@@ -29,11 +29,11 @@ JUDGE = os.getenv("CASCADE_JUDGE", "anthropic/claude-haiku-4-5-20251001")
 def cascade():
     judge_kwargs = {"region_name": os.environ["CASCADE_JUDGE_REGION"]} if os.getenv("CASCADE_JUDGE_REGION") else {}
     evaluator = CascadeEvaluator(
-        decider=f"decider/{CHECKPOINT}", judge=JUDGE, decider_kwargs={"timeout": 300.0}, judge_kwargs=judge_kwargs
+        jev="jev", judge=JUDGE, jev_kwargs={"use_local_model": True, "local_model": CHECKPOINT, "timeout": 300.0}, judge_kwargs=judge_kwargs
     )
-    evaluator.decider.warmup(port=int(os.getenv("DECIDER_PORT", "8000")), device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
+    evaluator.jev.warmup(port=int(os.getenv("DECIDER_PORT", "8000")), device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
     yield evaluator
-    evaluator.decider.shutdown()
+    evaluator.jev.shutdown()
 
 
 def show(result: CascadeOutput) -> None:
@@ -43,7 +43,7 @@ def show(result: CascadeOutput) -> None:
 
 
 def test_confident_questions_stay_local_and_unsure_ones_are_judged(cascade):
-    result = cascade.evaluate(DeciderInput(
+    result = cascade.evaluate(JevInput(
         state={
             "context": "Michael Collins remained in orbit in the Command Module while Armstrong and Aldrin walked on the Moon.",
             "response": "Buzz Aldrin stayed in the orbiter while Neil went down alone.",
@@ -69,7 +69,7 @@ def test_confident_questions_stay_local_and_unsure_ones_are_judged(cascade):
 
 
 def test_judge_answers_a_yes_no_question(cascade):
-    result = cascade.evaluate(DeciderInput(
+    result = cascade.evaluate(JevInput(
         state={"language": "python",
                "code": "def run(user_input):\n    db.execute(f\"SELECT * FROM users WHERE name = '{user_input}'\")"},
         # The real model scores this about 0.5, so |2p - 1| is near 0: it should escalate.

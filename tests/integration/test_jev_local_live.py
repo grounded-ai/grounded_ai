@@ -3,7 +3,7 @@ Runs the Decider backend against a real `strands-decider serve` and a real check
 
 Skipped unless DECIDER_LIVE=1, because it downloads the checkpoint and loads a 2B model:
 
-    pip install -e ".[decider]" pytest
+    pip install -e ".[jev-local]" pytest
     DECIDER_LIVE=1 pytest tests/integration -s
 
 DECIDER_CHECKPOINT, DECIDER_PORT and DECIDER_DEVICE override the defaults.
@@ -14,14 +14,14 @@ import os
 import pytest
 
 from grounded_ai import Evaluator
-from grounded_ai.backends.decider import (
+from grounded_ai.backends.jev import (
     HALLUCINATION,
     RAG_RELEVANCE,
     TOXICITY,
     ChoiceAnswer,
     ChoiceQuestion,
-    DeciderInput,
-    DeciderOutput,
+    JevInput,
+    JevOutput,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
@@ -43,15 +43,15 @@ Michael Collins remained in orbit in the Command Module.
 
 @pytest.fixture(scope="module")
 def evaluator():
-    evaluator = Evaluator(f"decider/{CHECKPOINT}", timeout=300.0)
+    evaluator = Evaluator("jev", use_local_model=True, local_model=CHECKPOINT, timeout=300.0)
     evaluator.backend.warmup(port=PORT, device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
     yield evaluator
     evaluator.backend.shutdown()
 
 
-def ask(evaluator, state, **questions) -> DeciderOutput:
-    result = evaluator.evaluate(DeciderInput(state=state, questions=questions))
-    assert isinstance(result, DeciderOutput), result
+def ask(evaluator, state, **questions) -> JevOutput:
+    result = evaluator.evaluate(JevInput(state=state, questions=questions))
+    assert isinstance(result, JevOutput), result
     print(f"\n{state if isinstance(state, str) else dict(state)}\n  -> {result.model_dump_json()}")
     return result
 
@@ -209,7 +209,7 @@ VARIETY = [
 
 @pytest.mark.parametrize("state,question,answer_type", VARIETY)
 def test_the_real_server_accepts_and_answers_every_shape(evaluator, state, question, answer_type):
-    """A DeciderOutput back means the request was accepted and the answer matched the question:
+    """A JevOutput back means the request was accepted and the answer matched the question:
     its type, and its probabilities over exactly the options or levels that were asked."""
     answer = ask(evaluator, state, q=question).answers["q"]
     assert isinstance(answer, answer_type)
@@ -232,7 +232,7 @@ def test_the_real_server_refuses_what_the_input_class_refuses(evaluator):
 
 
 def test_custom_input_class(evaluator):
-    class CodeReview(DeciderInput):
+    class CodeReview(JevInput):
         language: str
         code: str
 
@@ -246,7 +246,7 @@ def test_custom_input_class(evaluator):
 
 
 def test_wrong_model_name_is_refused(evaluator):
-    other = Evaluator("decider/some-other-checkpoint", base_url=f"http://127.0.0.1:{PORT}")
-    result = other.evaluate(DeciderInput(state="x", questions={"tone": TOXICITY}))
+    other = Evaluator("jev", use_local_model=True, local_model="some-other-checkpoint", base_url=f"http://127.0.0.1:{PORT}")
+    result = other.evaluate(JevInput(state="x", questions={"tone": TOXICITY}))
     assert isinstance(result, EvaluationError)
     assert result.error_code == "MODEL_MISMATCH"

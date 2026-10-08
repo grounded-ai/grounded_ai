@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "grounded-ai"
-version = "1.5.1"
+version = "2.0.0"
 description = "A Python package for evaluating LLM application outputs."
 readme = { file = "README.md", content-type = "text/markdown" }
 license = { file = "LICENSE" }
@@ -50,9 +50,13 @@ slm = [
   "flash-attn",
   "bitsandbytes",
 ]
-# Strands Decider: the HTTP client, plus the server (`strands-decider serve`) and its torch stack.
-# strands-decider requires Python >= 3.10.
-decider = [
+# Jev: the HTTP client for TypeSafe's hosted API.
+jev = [
+  "httpx>=0.23.0",
+]
+# Jev's local mode: the HTTP client, plus the Strands Decider server (`strands-decider serve`)
+# and its torch stack. strands-decider requires Python >= 3.10.
+jev-local = [
   "httpx>=0.23.0",
   "strands-decider; python_version >= '3.10'",
 ]

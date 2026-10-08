@@ -1,21 +1,22 @@
-name: Decider live test
+name: Jev live test
 
-# Runs the Decider backend against a real strands-decider server and checkpoint (CPU).
+# Runs JevEvaluator against the local model (a real strands-decider server and checkpoint, CPU),
+# and against hosted Jev when the TYPESAFE_API_KEY secret is set.
 on:
   workflow_dispatch:
   pull_request:
     branches: [ "main" ]
     paths:
-      - "grounded_ai/backends/decider.py"
+      - "grounded_ai/backends/jev.py"
       - "grounded_ai/__init__.py"
       - "tests/integration/**"
-      - "tests/test_decider_contract.py"
-      - "examples/backends/strands_decider.ipynb"
-      - ".github/workflows/decider-live.yml"
-      - ".github/scripts/decider_live_report.py"
+      - "tests/test_jev_contract.py"
+      - "examples/backends/jev.ipynb"
+      - ".github/workflows/jev-live.yml"
+      - ".github/scripts/jev_live_report.py"
 
 concurrency:
-  group: decider-live-${{ github.ref }}
+  group: jev-live-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -30,6 +31,7 @@ jobs:
       DECIDER_LIVE: "1"
       DECIDER_DEVICE: cpu
       DECIDER_CHECKPOINT: StrandsAgents/strands-decider-2B-hobson-v19
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}  # hosted tests skip without it
       HF_HOME: ${{ github.workspace }}/.hf
 
     steps:
@@ -52,25 +54,25 @@ jobs:
         python -m pip install --upgrade pip
         # CPU-only torch: the default Linux wheel pulls several GB of CUDA libraries.
         pip install torch --index-url https://download.pytorch.org/whl/cpu
-        pip install -e ".[decider]" pytest pytest-asyncio nbconvert ipykernel
+        pip install -e ".[jev-local]" pytest pytest-asyncio nbconvert ipykernel
 
     - name: Run the live tests
       run: |
         set -o pipefail
         # The contract tests also run here: with the server installed they check our classes against its wire types.
-        pytest tests/test_decider_contract.py -q
+        pytest tests/test_jev_contract.py -q
         pytest tests/integration -s -v | tee live-tests.txt
 
     - name: Run the example notebook
       run: |
-        jupyter nbconvert --to notebook --execute examples/backends/strands_decider.ipynb \
-          --output strands_decider.executed.ipynb --output-dir executed --ExecutePreprocessor.timeout=1800
+        jupyter nbconvert --to notebook --execute examples/backends/jev.ipynb \
+          --output jev.executed.ipynb --output-dir executed --ExecutePreprocessor.timeout=1800
 
     - name: Upload the executed notebook
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: strands-decider-notebook
+        name: jev-notebook
         path: executed/
         if-no-files-found: ignore
 
@@ -81,5 +83,5 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        python .github/scripts/decider_live_report.py > report.md
+        python .github/scripts/jev_live_report.py > report.md
         gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
