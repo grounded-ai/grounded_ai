@@ -148,7 +148,13 @@ grounded-ai check --model jev/jev-latest --context @docs/refund-policy.md \
 
 `grounded-ai hook` runs the same check as a Stop hook for **Claude Code** and **Codex**: when the agent finishes a turn, its answer is checked against the tool output from that turn, and an unsupported answer sends the agent back to re-check its claims. It never blocks twice in a row and lets the agent stop if the check itself fails.
 
-Claude Code (`.claude/settings.json`):
+Claude Code, as a plugin (install the CLI first: `uv tool install "grounded-ai[jev]"`, and set `TYPESAFE_API_KEY`):
+
+```
+/plugin install grounded-ai --marketplace grounded-ai/grounded_ai
+```
+
+Or add it yourself in `.claude/settings.json`:
 
 ```json
 {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "grounded-ai hook --model jev/jev-latest", "timeout": 60}]}]}}

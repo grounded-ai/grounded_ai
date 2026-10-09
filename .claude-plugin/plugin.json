@@ -1,0 +1,10 @@
+{
+  "name": "grounded-ai",
+  "version": "2.0.0",
+  "description": "Stop hook that checks Claude's final answer against the turn's tool output with TypeSafe's Jev, and sends Claude back to re-check unsupported claims.",
+  "author": {"name": "The grounded-ai authors"},
+  "homepage": "https://groundedai.tech",
+  "repository": "https://github.com/grounded-ai/grounded_ai",
+  "license": "MIT",
+  "keywords": ["hooks", "hallucination", "evaluation", "jev"]
+}
