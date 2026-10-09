@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "grounded-ai hook --model jev/jev-latest", "timeout": 60}
+        ]
+      }
+    ]
+  }
+}
