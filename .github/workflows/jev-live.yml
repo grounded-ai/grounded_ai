@@ -44,7 +44,7 @@ jobs:
         cache: pip
 
     - name: Cache the checkpoint
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .hf
         key: hf-${{ env.DECIDER_CHECKPOINT }}
