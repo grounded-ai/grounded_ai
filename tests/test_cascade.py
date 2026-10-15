@@ -13,7 +13,7 @@ from grounded_ai import CascadeEvaluator, Evaluator
 from grounded_ai.backends.jev import (
     ChoiceAnswer,
     ChoiceQuestion,
-    JevEvaluator,
+    DecisionEvaluator,
     JevInput,
     JevOutput,
     NoulAnswer,
@@ -56,7 +56,7 @@ def fake_jev(answers, seen=None, status=200):
             return httpx.Response(status, json={"detail": "boom"})
         return httpx.Response(200, json={"model": MODEL, "answers": {k: answers[k] for k in body["questions"]}})
 
-    return JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)),
+    return DecisionEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)),
                           async_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
 
 
@@ -213,7 +213,7 @@ class TestReviewFixes:
             reply = {k: UNSURE[k] for k in reversed(list(body["questions"]))}  # server answers in another order
             return httpx.Response(200, json={"answers": reply})
 
-        backend = JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        backend = DecisionEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
         judge = FakeJudge({"area": "billing", "urgent": True, "clarity": "clear"})
         result = CascadeEvaluator(jev=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
         assert result.escalated == ["area", "urgent", "clarity"]
@@ -291,13 +291,13 @@ class TestFailures:
 class TestConstruction:
     def test_from_model_strings(self):
         evaluator = CascadeEvaluator(jev="jev", jev_kwargs={"use_local_model": True, "local_model": MODEL}, judge="openai/gpt-4o-mini", judge_kwargs={"api_key": "k"})
-        assert isinstance(evaluator.jev, JevEvaluator)
+        assert isinstance(evaluator.jev, DecisionEvaluator)
         assert evaluator.jev.model_name == MODEL
         assert evaluator.judge.model_name == "gpt-4o-mini"
 
     def test_from_evaluators(self):
         evaluator = CascadeEvaluator(jev=Evaluator("jev", use_local_model=True, local_model=MODEL), judge=FakeJudge())
-        assert isinstance(evaluator.jev, JevEvaluator)
+        assert isinstance(evaluator.jev, DecisionEvaluator)
 
     def test_first_stage_must_be_jev(self):
         with pytest.raises(TypeError):

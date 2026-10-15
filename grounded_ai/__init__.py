@@ -31,7 +31,7 @@ def _prepare_input(
     Splits kwargs into input-construction fields and backend runtime args.
     Returns (input_data, backend_kwargs).
     """
-    # A backend with its own input class (JevEvaluator's JevInput) names the field
+    # A backend with its own input class (a decision model's JevInput) names the field
     # a bare string goes into; every other backend takes the stock EvaluationInput.
     primary = getattr(backend, "primary_input_field", None)
     if primary:
@@ -65,7 +65,23 @@ class Evaluator:
         """
         Routes the model string to the correct backend implementation.
         """
-        if model.startswith("grounded-ai/"):
+        # Decision models first: "openai-decisions/" must not fall into "openai/".
+        if model.startswith("systemone/"):
+            from .backends.jev import DecisionEvaluator
+
+            if not (kwargs.get("host") or kwargs.get("base_url")):
+                raise ValueError(
+                    "systemone/ needs to know where the server is: base_url=\"http://...\" or host= "
+                    "(typesafe, strands, llamacpp, ollama)."
+                )
+            return DecisionEvaluator(model_name=model[len("systemone/"):], **kwargs)
+
+        elif model.startswith("openai-decisions/"):
+            from .backends.openai_decisions import OpenAIDecisionsEvaluator
+
+            return OpenAIDecisionsEvaluator(model_name=model[len("openai-decisions/"):], **kwargs)
+
+        elif model.startswith("grounded-ai/"):
             from .backends.grounded_ai_slm.backend import GroundedAISLMBackend
 
             return GroundedAISLMBackend(model_id=model, **kwargs)
@@ -95,13 +111,16 @@ class Evaluator:
             return BedrockBackend(model_id=model.replace("bedrock/", ""), **kwargs)
 
         elif model == "jev" or model.startswith("jev/"):
-            from .backends.jev import JevEvaluator
+            from .backends.jev import DecisionEvaluator
 
-            return JevEvaluator(model_name=model[len("jev/"):] or "jev-latest", **kwargs)
+            # Jev is a host preset of the one decision-model backend: TypeSafe, or Strands Decider locally.
+            kwargs.setdefault("host", "strands" if kwargs.get("use_local_model") else "typesafe")
+            return DecisionEvaluator(model_name=model[len("jev/"):] or "jev-latest", **kwargs)
 
         else:
             raise ValueError(
-                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/', 'jev/'."
+                f"Unknown model provider for '{model}'. Supported: 'grounded-ai/', 'openai/', 'anthropic/', 'hf/', 'bedrock/', "
+                "'jev/', 'systemone/', 'openai-decisions/'."
             )
 
     def _prepare_input(
@@ -173,10 +192,19 @@ def __getattr__(name: str):
         from .cascade import CascadeEvaluator
 
         return CascadeEvaluator
-    if name in ("JevEvaluator", "JevInput", "JevOutput"):
+    if name in ("DecisionEvaluator", "DecisionInput", "DecisionOutput", "JevEvaluator", "JevInput", "JevOutput",
+                "confidence"):
         from .backends import jev
 
         return getattr(jev, name)
+    if name == "OpenAIDecisionsEvaluator":
+        from .backends.openai_decisions import OpenAIDecisionsEvaluator
+
+        return OpenAIDecisionsEvaluator
+    if name == "compare":
+        from .comparison import compare
+
+        return compare
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -184,9 +212,15 @@ __all__ = [
     "Evaluator",
     "AsyncEvaluator",
     "CascadeEvaluator",
-    "JevEvaluator",
+    "DecisionEvaluator",
+    "DecisionInput",
+    "DecisionOutput",
+    "JevEvaluator",  # deprecated: DecisionEvaluator
     "JevInput",
     "JevOutput",
+    "OpenAIDecisionsEvaluator",
+    "confidence",
+    "compare",
     "EvaluationInput",
     "EvaluationOutput",
     "EvaluationError",

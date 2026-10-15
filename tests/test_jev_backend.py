@@ -10,7 +10,7 @@ from grounded_ai.backends.jev import (
     HALLUCINATION,
     RAG_RELEVANCE,
     TOXICITY,
-    JevEvaluator,
+    DecisionEvaluator,
     JevInput,
     JevOutput,
 )
@@ -65,7 +65,7 @@ def make_backend(seen=None, p=0.9, pick=0, health=HEALTH, health_calls=None, res
 
     transport = httpx.MockTransport(handler)
     client_kwargs = {"async_client": httpx.AsyncClient(transport=transport)} if async_ else {}
-    return JevEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=transport), **client_kwargs, **kwargs)
+    return DecisionEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=transport), **client_kwargs, **kwargs)
 
 
 def ask(state="x", **fields):
@@ -84,7 +84,7 @@ class TestContract:
 
     def test_factory_routing(self):
         evaluator = Evaluator("jev", use_local_model=True, local_model=MODEL, base_url="http://127.0.0.1:8010/")
-        assert isinstance(evaluator.backend, JevEvaluator)
+        assert isinstance(evaluator.backend, DecisionEvaluator)
         assert evaluator.backend.model_name == MODEL
         assert evaluator.backend.base_url == "http://127.0.0.1:8010"
 
@@ -230,7 +230,7 @@ class TestServer:
             make_backend().evaluate(ask("word " * 200))
 
     def test_connection_error(self):
-        backend = JevEvaluator(use_local_model=True, local_model=MODEL, base_url="http://127.0.0.1:9")
+        backend = DecisionEvaluator(use_local_model=True, local_model=MODEL, base_url="http://127.0.0.1:9")
         result = backend.evaluate(ask())
         assert result.error_code == "CONNECTION_ERROR"
 
@@ -277,7 +277,7 @@ class TestWarmup:
             body = json.loads(request.content)
             return httpx.Response(200, json={"answers": {n: answer(q) for n, q in body["questions"].items()}})
 
-        return JevEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        return DecisionEvaluator(use_local_model=True, local_model=model_name, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     def test_starts_the_server_on_the_port_and_waits(self, monkeypatch):
         up, started = set(), []
@@ -362,7 +362,7 @@ class TestWarmup:
 
 
 def hosted(responses, seen=None, async_=False, **kwargs):
-    """A hosted JevEvaluator whose HTTP client replays `responses` (status, json) in order."""
+    """A hosted DecisionEvaluator whose HTTP client replays `responses` (status, json) in order."""
     queue = list(responses)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -376,7 +376,7 @@ def hosted(responses, seen=None, async_=False, **kwargs):
     clients = {"client": httpx.Client(transport=transport)}
     if async_:
         clients["async_client"] = httpx.AsyncClient(transport=transport)
-    return JevEvaluator(api_key=kwargs.pop("api_key", "ts-key"), **clients, **kwargs)
+    return DecisionEvaluator(api_key=kwargs.pop("api_key", "ts-key"), **clients, **kwargs)
 
 
 URGENT = {"is_urgent": {"type": "noul", "instructions": "Does this convey urgency?"}}
@@ -405,12 +405,12 @@ class TestHosted:
 
     def test_base_url_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("TYPESAFE_API_BASE", "http://proxy.local/typesafe/")
-        assert JevEvaluator(api_key="k").base_url == "http://proxy.local/typesafe"
+        assert DecisionEvaluator(api_key="k").base_url == "http://proxy.local/typesafe"
 
     def test_a_missing_key_is_an_error_up_front(self, monkeypatch):
         monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
         with pytest.raises(ValueError, match="TYPESAFE_API_KEY.*use_local_model=True"):
-            JevEvaluator()
+            DecisionEvaluator()
 
     def test_local_mode_needs_no_key(self, monkeypatch):
         monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
@@ -469,7 +469,7 @@ class TestReviewFindings:
 
     def test_negative_max_retries_is_refused(self):
         with pytest.raises(ValueError, match="max_retries"):
-            JevEvaluator(api_key="k", max_retries=-1)
+            DecisionEvaluator(api_key="k", max_retries=-1)
 
     def test_missing_questions_is_an_evaluation_error_not_a_crash(self):
         evaluator = Evaluator("jev", api_key="k")
@@ -490,7 +490,7 @@ class TestFailureReasons:
         def handler(request):
             return httpx.Response(status, json=body)
 
-        backend = JevEvaluator(api_key="k", max_retries=0, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        backend = DecisionEvaluator(api_key="k", max_retries=0, client=httpx.Client(transport=httpx.MockTransport(handler)))
         return backend.evaluate(JevInput(state="x", questions=URGENT))
 
     def test_structured_api_errors_read_as_text(self):

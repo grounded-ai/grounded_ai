@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import warnings
-from typing import Any, Dict, List, Literal, Optional, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from typing_extensions import Annotated
@@ -101,6 +101,65 @@ class ScoreAnswer(BaseModel):
 Answer = Annotated[Union[NoulAnswer, ChoiceAnswer, ScoreAnswer], Field(discriminator="type")]
 
 
+def confidence(answer: Union[NoulAnswer, ChoiceAnswer, ScoreAnswer]) -> float:
+    """TypeSafe's confidence (docs.typesafe.ai/confidence), computed from the answer's probabilities.
+
+    - noul: |2p - 1|.
+    - choice: (p_max - 1/n) / (1 - 1/n) over n options, so 0 is uniform and 1 certain at any n.
+    - score: 1 - (mean distance from the most likely level) / (the same for a uniform answer), at least 0.
+
+    Decision models do not agree on the `confidence` they report: Jev, Strands Decider and OpenAI's
+    Decisions API use these definitions, while d1 and Clef served locally report the top probability
+    (0.53 for a 53/47 answer). Answers from `systemone/` servers carry this instead of their own, so one
+    threshold means the same thing on every backend.
+    """
+    if isinstance(answer, NoulAnswer):
+        return abs(2 * answer.noul - 1)
+    p = list(answer.probabilities.values())
+    n = len(p)
+    if isinstance(answer, ChoiceAnswer):
+        return min(1.0, max(0.0, (answer.probabilities[answer.choice] - 1 / n) / (1 - 1 / n)))
+    levels = sorted((int(k), v) for k, v in answer.probabilities.items())
+    top = max(levels, key=lambda kv: kv[1])[0]
+    uniform = sum(abs(i - (n - 1) / 2) for i in range(n)) / n
+    return max(0.0, 1 - sum(v * abs(i - top) for i, v in levels) / uniform)
+
+
+class Capabilities(BaseModel):
+    """What a decision model accepts. A request outside it is refused before it is sent, as
+    INVALID_REQUEST, instead of reaching a server that would reject it or answer something else."""
+
+    model_config = ConfigDict(frozen=True)
+
+    question_types: Tuple[str, ...] = ("noul", "choice", "score")
+    max_options: int = 255  # choice options
+    max_levels: int = 10  # score levels
+    text_criteria_only: bool = False  # option descriptions and levels as text (no JSON, no null)
+
+
+class SystemOneHost(BaseModel):
+    """A known place that serves `POST /v1/systemone`: Evaluator("systemone/<model>", host="ollama")."""
+
+    base_url: str
+    api_key_env: Optional[str] = None
+    capabilities: Capabilities = Capabilities()
+    recompute_confidence: bool = True  # False where the server already reports TypeSafe's definition
+
+
+# Hosts whose address and API we checked. Anything else serving /v1/systemone works through base_url=.
+SYSTEMONE_HOSTS: Dict[str, SystemOneHost] = {
+    "typesafe": SystemOneHost(base_url="https://api.typesafe.ai", api_key_env="TYPESAFE_API_KEY",
+                              recompute_confidence=False),
+    "llamacpp": SystemOneHost(base_url="http://127.0.0.1:8080"),  # llama-server's default port
+    "ollama": SystemOneHost(base_url="http://127.0.0.1:11434"),
+    # `strands-decider serve` (0.1.0) takes criteria as text only.
+    "strands": SystemOneHost(base_url="http://127.0.0.1:8000", capabilities=Capabilities(text_criteria_only=True),
+                             recompute_confidence=False),
+}
+# Environment variables that move a host (kept from before: TYPESAFE_API_BASE, DECIDER_BASE_URL).
+_HOST_URL_ENV = {"typesafe": "TYPESAFE_API_BASE", "strands": "DECIDER_BASE_URL"}
+
+
 # Ready-made questions for the evaluations Grounded AI ships. Phrased positively on purpose: on
 # Strands Decider 2B the negated noul "Does the response make claims the context does not support?"
 # was answered as its opposite (AUC 0.00 on 14 items) while this choice separated all 14.
@@ -151,14 +210,14 @@ class SystemOneRequest(BaseModel):
 
 # --- The classes people work with ---------------------------------------------------------------
 #
-# These are JevEvaluator's own input and output. They are not EvaluationInput and EvaluationOutput:
+# These are DecisionEvaluator's own input and output. They are not EvaluationInput and EvaluationOutput:
 # those describe a text-generating judge (response/query/context, a prompt template, a free-form
 # label and reasoning), which is not this model's contract.
 
 
 class JevInput(BaseModel):
     """
-    Input for JevEvaluator: the two things a `/v1/systemone` request is made of.
+    Input for a decision model: the two things a `/v1/systemone` request is made of.
 
     - `questions`: what the model is asked, by name.
     - `state`: what the model reads, as text or JSON.
@@ -192,7 +251,7 @@ class JevInput(BaseModel):
 class JevOutput(BaseModel):
     """What `/v1/systemone` returns: one answer per question, under the question's name.
 
-    This is the model's contract and the only thing JevEvaluator returns."""
+    This is the model's contract and the only thing DecisionEvaluator returns."""
 
     answers: Dict[str, Answer]
     model: Optional[str] = Field(None, description="The model that answered, e.g. jev-1.13.0")
@@ -205,22 +264,27 @@ DEFAULT_LOCAL_MODEL = "StrandsAgents/strands-decider-2B-hobson-v19"
 _RETRY_STATUSES = (429, 529)  # rate limited, overloaded: retry with backoff (docs.typesafe.ai/api)
 
 
-class JevEvaluator(BaseEvaluator):
+class DecisionEvaluator(BaseEvaluator):
     """
-    TypeSafe's Jev, a decision model behind the `POST /v1/systemone` contract. Jev reads a
-    state and answers typed questions (noul, choice, score) with probabilities read off the
-    model, so the output cannot leave the schema and `confidence` is measured, not self-reported.
-    There is no system message and nothing is sampled, so it takes no `system_prompt`,
-    `temperature` or other generation arguments.
+    A decision model behind `POST /v1/systemone`: it reads a state and answers typed questions
+    (noul, choice, score) with probabilities read off the model, so the output cannot leave the
+    schema and `confidence` is measured, not self-reported. There is no system message and nothing
+    is sampled, so it takes no `system_prompt`, `temperature` or other generation arguments.
 
-    Two places to run it, same input and output:
+    One class for every model that speaks the contract; `host` says where it runs:
 
-    - Hosted (default): TypeSafe's API, `model_name` (e.g. "jev-latest" or a pinned "jev-1.13.0"),
-      authenticated with `api_key` or TYPESAFE_API_KEY.
-    - `use_local_model=True`: Strands Decider, the open-weights model with the same contract,
-      served on your machine by `strands-decider serve`. `local_model` names the checkpoint; the
-      first call checks it against the server's `/health`, so a different model cannot answer
-      silently. `warmup(port=...)` starts that server for you.
+    - "typesafe" (default): TypeSafe's hosted Jev, `model_name` e.g. "jev-latest" or "jev-1.13.0",
+      authenticated with `api_key` or TYPESAFE_API_KEY.  Evaluator("jev/jev-latest")
+    - "strands": Strands Decider served on your machine by `strands-decider serve`. The first call
+      checks `model_name` (the checkpoint) against the server's `/health`, so a different model
+      cannot answer silently; `warmup(port=...)` starts the server.  Evaluator("jev", use_local_model=True)
+    - "llamacpp", "ollama": llama.cpp's llama-server and Ollama on their default local ports.
+    - no host, `base_url=`: any other /v1/systemone server (vLLM, SGLang, a vendor's API, our own
+      agent-decision models).  Evaluator("systemone/<model>", base_url="http://...")
+
+    Servers do not agree on what `confidence` means. Jev and Strands Decider report TypeSafe's
+    definition; on every other host each answer's confidence is recomputed from its probabilities
+    (see confidence()), so one threshold means the same on every backend.
 
     The input is a JevInput (state + questions) and the output is a JevOutput (answers). Customize
     the input by subclassing JevInput; the contract itself cannot be changed, and every request is
@@ -233,8 +297,7 @@ class JevEvaluator(BaseEvaluator):
     def __init__(
         self,
         model_name: str = "jev-latest",
-        use_local_model: bool = False,
-        local_model: str = DEFAULT_LOCAL_MODEL,
+        host: Optional[str] = None,
         base_url: str = None,
         api_key: str = None,
         timeout: float = 30.0,
@@ -242,6 +305,9 @@ class JevEvaluator(BaseEvaluator):
         client: Optional[Any] = None,
         async_client: Optional[Any] = None,
         input_schema: Type[JevInput] = JevInput,
+        capabilities: Optional[Capabilities] = None,
+        use_local_model: bool = False,
+        local_model: str = DEFAULT_LOCAL_MODEL,
     ):
         if not (isinstance(input_schema, type) and issubclass(input_schema, JevInput)):
             raise TypeError("input_schema must be JevInput or a subclass of it.")
@@ -252,28 +318,36 @@ class JevEvaluator(BaseEvaluator):
             raise ImportError(
                 "httpx package is not installed. Please install it via `pip install grounded-ai[jev]`."
             )
+        if use_local_model:  # the older way to say host="strands"
+            host, model_name = host or "strands", local_model
+        elif host is None and base_url is None:
+            host = "typesafe"
+        if host is not None and host not in SYSTEMONE_HOSTS:
+            raise ValueError(f"Unknown host {host!r}. Known: {sorted(SYSTEMONE_HOSTS)}; or pass base_url=.")
+        preset = SYSTEMONE_HOSTS.get(host)
 
-        self.use_local_model = use_local_model
-        self.local_model = local_model
-        if use_local_model:
-            self.model_name = local_model  # the local server ignores the field; /health is checked instead
-            base_url = base_url or os.getenv("DECIDER_BASE_URL") or "http://127.0.0.1:8000"
-        else:
-            self.model_name = model_name
-            base_url = base_url or os.getenv("TYPESAFE_API_BASE") or JEV_API_BASE
-            api_key = api_key or os.getenv("TYPESAFE_API_KEY")
-            if not api_key:
-                raise ValueError(
-                    "Jev needs an API key: pass api_key or set TYPESAFE_API_KEY "
-                    "(console.typesafe.ai -> API Keys). To run locally instead, use use_local_model=True."
-                )
+        self.host = host
+        self.model_name = model_name
+        self.use_local_model = host == "strands"  # a local Strands Decider server, checked against /health
+        self.local_model = model_name
+        base_url = base_url or os.getenv(_HOST_URL_ENV.get(host, ""), "") or preset.base_url
+        if preset is not None and preset.api_key_env:
+            api_key = api_key or os.getenv(preset.api_key_env)
+        if host == "typesafe" and not api_key:
+            raise ValueError(
+                "Jev needs an API key: pass api_key or set TYPESAFE_API_KEY "
+                "(console.typesafe.ai -> API Keys). To run locally instead, use use_local_model=True."
+            )
+        self.capabilities = capabilities or (preset.capabilities if preset else Capabilities())
+        # Replace the server's own `confidence` with confidence()? Not for hosts that already report it.
+        self.recompute_confidence = preset.recompute_confidence if preset else True
         self.base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self._timeout = timeout
         self.max_retries = max_retries
         self.client = client or httpx.Client(timeout=timeout)
         self._async_client = async_client
-        self._model_checked = not use_local_model  # hosted: the API resolves model names itself
+        self._model_checked = not self.use_local_model  # elsewhere the server resolves model names itself
         self._max_length = None  # the local model's token window, from /health
         self._server = None  # the process warmup() started, if any
         self._server_log = None  # where that process's output goes
@@ -293,7 +367,7 @@ class JevEvaluator(BaseEvaluator):
         device: str = None,
         timeout: float = 600.0,
         verbose: bool = False,
-    ) -> "JevEvaluator":
+    ) -> "DecisionEvaluator":
         """
         Start `strands-decider serve` on `port` and wait until it is ready, so the evaluator
         can be used right away. Points this evaluator at http://127.0.0.1:<port>. Local mode only.
@@ -313,7 +387,7 @@ class JevEvaluator(BaseEvaluator):
         if not self.use_local_model:
             raise ValueError(
                 "warmup() starts a local Strands Decider server; hosted Jev needs no warmup. "
-                "Use JevEvaluator(use_local_model=True) to run locally."
+                "Use host=\"strands\" (or use_local_model=True) to run locally."
             )
         self.base_url = f"http://127.0.0.1:{port}"
         self._model_checked = False
@@ -427,18 +501,18 @@ class JevEvaluator(BaseEvaluator):
         """The request body, taken straight from the input: its state and its questions."""
         if kwargs:
             raise ValueError(
-                f"JevEvaluator does not take {sorted(kwargs)}. Its input is `questions` and `state` "
+                f"{type(self).__name__} does not take {sorted(kwargs)}. Its input is `questions` and `state` "
                 f"(plus the fields of {self.input_schema.__name__}); a decision model has no system "
                 "message and does not sample, so there are no generation arguments."
             )
         if not isinstance(input_data, JevInput):
             raise ValueError(
-                f"JevEvaluator needs a JevInput (or a subclass), got {type(input_data).__name__}. "
+                f"{type(self).__name__} needs a JevInput (or a subclass), got {type(input_data).__name__}. "
                 "It carries the `questions` the model is asked."
             )
         if output_schema is not JevOutput:
             raise ValueError(
-                "JevEvaluator returns a JevOutput: its answers are the model's contract and "
+                f"{type(self).__name__} returns a JevOutput: its answers are the model's contract and "
                 f"cannot be reshaped into {getattr(output_schema, '__name__', output_schema)}. "
                 "Customize the input (JevInput) instead."
             )
@@ -450,6 +524,7 @@ class JevEvaluator(BaseEvaluator):
             raise ValueError(f"The request does not match the /v1/systemone contract: {e}") from e
         if self.use_local_model:
             _require_text_criteria(request.questions)
+        _check_capabilities(request.questions, self.capabilities)
         return _wire(request)
 
     def _read(self, response: Any, questions: Dict[str, Any]) -> JevOutput:
@@ -457,6 +532,10 @@ class JevEvaluator(BaseEvaluator):
         try:
             output = JevOutput(**response.json())
             _check_answers(output.answers, questions)
+            if self.recompute_confidence:
+                for answer in output.answers.values():
+                    if not isinstance(answer, NoulAnswer):
+                        answer.confidence = confidence(answer)
             return output
         except (KeyError, TypeError, ValueError) as e:
             raise ResponseError(f"Could not read the answer into JevOutput: {e!r}") from e
@@ -514,6 +593,27 @@ class JevEvaluator(BaseEvaluator):
             return _to_error(e)
 
 
+class JevEvaluator(DecisionEvaluator):
+    """Deprecated: use DecisionEvaluator (host="typesafe", the default, or host="strands"), or
+    Evaluator("jev/..."). Kept so existing code runs; it behaves exactly as before."""
+
+    def __init__(self, model_name: str = "jev-latest", use_local_model: bool = False,
+                 local_model: str = DEFAULT_LOCAL_MODEL, **kwargs):
+        warnings.warn(
+            "JevEvaluator is deprecated and will be removed in a future release; use DecisionEvaluator "
+            "(or Evaluator(\"jev/...\")), which takes the same arguments.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        kwargs.setdefault("host", "strands" if use_local_model else "typesafe")
+        super().__init__(model_name=model_name, use_local_model=use_local_model, local_model=local_model, **kwargs)
+
+
+# Input and output under the names that do not single out one vendor.
+DecisionInput = JevInput
+DecisionOutput = JevOutput
+
+
 def _require_text_criteria(questions: Dict[str, Any]) -> None:
     """The local Strands Decider server (0.1.0) takes criteria as text only; hosted Jev also takes
     JSON and null descriptions. Refused here so the local server never gets a request it rejects."""
@@ -524,6 +624,22 @@ def _require_text_criteria(questions: Dict[str, Any]) -> None:
                 f"'{name}': the local model takes criteria as text only. Structured or null criteria "
                 "need hosted Jev (use_local_model=False)."
             )
+
+
+def _check_capabilities(questions: Dict[str, Any], capabilities: Capabilities) -> None:
+    for name, q in questions.items():
+        if q.type not in capabilities.question_types:
+            raise ValueError(
+                f"'{name}': this model answers {' and '.join(capabilities.question_types)} questions, not {q.type}."
+            )
+        if q.type == "choice" and len(q.criteria) > capabilities.max_options:
+            raise ValueError(f"'{name}': this model takes at most {capabilities.max_options} options, got {len(q.criteria)}.")
+        if q.type == "score" and len(q.criteria) > capabilities.max_levels:
+            raise ValueError(f"'{name}': this model takes at most {capabilities.max_levels} levels, got {len(q.criteria)}.")
+        if capabilities.text_criteria_only:
+            values = q.criteria.values() if isinstance(q.criteria, dict) else (q.criteria or [])
+            if any(not isinstance(v, str) for v in values):
+                raise ValueError(f"'{name}': this model takes criteria as text only (no JSON or null descriptions).")
 
 
 def _wire(request: "SystemOneRequest") -> Dict[str, Any]:

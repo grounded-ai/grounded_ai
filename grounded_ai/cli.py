@@ -15,7 +15,8 @@ Command line: a faithfulness check, and the same check as a Stop hook for coding
 
 MODEL is any Evaluator model string: "anthropic/...", "openai/...", "bedrock/...", "hf/...", or
 "jev/..." (hosted Jev with TYPESAFE_API_KEY, or with --local a strands-decider server; set
-DECIDER_BASE_URL or --base-url).
+DECIDER_BASE_URL or --base-url), "systemone/..." (any /v1/systemone server, with --base-url) or
+"openai-decisions/..." (OpenAI's Decisions API, OPENAI_API_KEY).
 The grounded-ai/ SLM and hf/ text-classification models answer in fixed formats and cannot be used.
 """
 
@@ -99,6 +100,10 @@ def _raise_on_error(result):
     return result
 
 
+# Decision models: typed questions with probabilities (Jev, any /v1/systemone server, OpenAI Decisions).
+_DECISION_MODELS = ("jev/", "systemone/", "openai-decisions/")
+
+
 def make_checker(
     model: str, base_url: Optional[str] = None, region: Optional[str] = None, local: bool = False
 ) -> Callable[..., Verdict]:
@@ -106,16 +111,17 @@ def make_checker(
     Raises ValueError for a model or flag that cannot work, and RuntimeError when a check fails."""
     if model.startswith(_NO_VERDICT):
         raise ValueError(
-            f"{model} cannot give a faithfulness verdict; use a jev/ model or an LLM judge"
+            f"{model} cannot give a faithfulness verdict; use a decision model (jev/, systemone/, "
+            "openai-decisions/) or an LLM judge"
         )
     if region and not model.startswith("bedrock/"):
         raise ValueError("--region only applies to bedrock/ models")
-    if base_url and not model.startswith("jev/"):
-        raise ValueError("--base-url only applies to jev/ models")
+    if base_url and not model.startswith(("jev/", "systemone/")):
+        raise ValueError("--base-url only applies to jev/ and systemone/ models")
     if local and not model.startswith("jev/"):
         raise ValueError("--local only applies to jev/ models")
 
-    if model.startswith("jev/"):
+    if model.startswith(_DECISION_MODELS):
         from .backends.jev import HALLUCINATION, JevInput
 
         kwargs = {"base_url": base_url} if base_url else {}
@@ -319,9 +325,36 @@ def _hook(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     return 0
 
 
+def _compare(args, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    from .comparison import collect, load_items, load_records, report, save_records
+
+    try:
+        items = load_items(args.items)
+        records = []
+        for path in args.records or []:
+            records += load_records(path)
+        if args.model:
+            new = collect(items, args.model, workers=args.workers)
+            records += new
+            if args.save_records:
+                save_records(new, args.save_records)
+        if not records:
+            raise ValueError("nothing to compare: give --model, --records, or both")
+        result = report(items, records, thresholds=args.thresholds, judge=args.judge,
+                        target_accuracy=args.target_accuracy, workers=args.workers)
+    except Exception as e:  # noqa: BLE001
+        print(f"grounded-ai compare: {e}", file=stderr)
+        return 2
+    print(result.table(), file=stdout)
+    if args.json:
+        with open(args.json, "w") as f:
+            f.write(result.model_dump_json(indent=2))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="grounded-ai", description="Faithfulness checks from the command line."
+        prog="grounded-ai", description="Faithfulness checks and decision-model comparisons from the command line."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -331,7 +364,7 @@ def _parser() -> argparse.ArgumentParser:
             required=True,
             help='Evaluator model string, e.g. "anthropic/claude-haiku-4-5"',
         )
-        p.add_argument("--base-url", help="Server URL (jev/ models)")
+        p.add_argument("--base-url", help="Server URL (jev/ and systemone/ models)")
         p.add_argument("--local", action="store_true", help="jev/ models: run on the local Strands Decider server")
         p.add_argument("--region", help="AWS region (bedrock/ models)")
 
@@ -359,6 +392,23 @@ def _parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_CONTEXT_CHARS,
         help="Keep at most this much tool output, the most recent (default %(default)s)",
     )
+
+    cmp = sub.add_parser(
+        "compare",
+        help="Which decision model, at what threshold: accuracy, calibration and cascade on your labelled items.",
+    )
+    cmp.set_defaults(run=_compare)
+    cmp.add_argument("items", help='JSONL: {"state": ..., "questions": {...}, "labels": {...}} per line')
+    cmp.add_argument("--model", action="append",
+                     help='A decision model, repeatable: "jev/jev-latest", "openai-decisions/gpt-6-luna", '
+                          '"systemone/<model>@http://host:port"')
+    cmp.add_argument("--judge", help="LLM judge for the cascade rows, e.g. anthropic/claude-sonnet-4-6 (optional)")
+    cmp.add_argument("--thresholds", type=float, nargs="+", default=[0.5, 0.7, 0.8, 0.9])
+    cmp.add_argument("--target-accuracy", type=float, help="Recommend the lowest threshold whose settled answers reach it")
+    cmp.add_argument("--records", action="append", help="Records saved by an earlier run (merge models run elsewhere)")
+    cmp.add_argument("--save-records", help="Save this run's records here")
+    cmp.add_argument("--json", help="Write the full report here")
+    cmp.add_argument("--workers", type=int, default=6)
     return parser
 
 

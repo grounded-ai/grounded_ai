@@ -1,5 +1,5 @@
 """
-JevEvaluator's contract, both directions:
+DecisionEvaluator's contract, both directions:
 
 - Input: a variety of JevInput shapes must map onto the `/v1/systemone` request exactly.
 - Output: a variety of server responses must parse into the right answer fields, and anything
@@ -21,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 from grounded_ai.backends.jev import (
     ChoiceAnswer,
     ChoiceQuestion,
-    JevEvaluator,
+    DecisionEvaluator,
     JevInput,
     JevOutput,
     NoulAnswer,
@@ -71,7 +71,7 @@ def backend(seen=None, answers=None, body=None):
         reply = answers if answers is not None else {n: default_answer(q) for n, q in sent["questions"].items()}
         return httpx.Response(200, json={"model": MODEL, "answers": reply, "usage": {"input_tokens": 9, "output_tokens": len(reply)}})
 
-    return JevEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    return DecisionEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
 
 
 def sent_body(input_data):
@@ -181,7 +181,7 @@ def hosted_body(input_data):
         return httpx.Response(200, json={"model": "jev-1.13.0", "answers": answers})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    result = JevEvaluator(api_key="k", client=client).evaluate(input_data)
+    result = DecisionEvaluator(api_key="k", client=client).evaluate(input_data)
     assert isinstance(result, JevOutput), result
     (body,) = seen
     return body

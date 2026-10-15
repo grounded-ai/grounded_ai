@@ -30,7 +30,7 @@ from .base import BaseEvaluator
 from .backends.jev import (
     ChoiceAnswer,
     Content,
-    JevEvaluator,
+    DecisionEvaluator,
     JevInput,
     JevOutput,
     NoulAnswer,
@@ -169,7 +169,7 @@ def _refuse_unusable_judge(judge: BaseEvaluator) -> None:
     Jev answers only its own contract, the SLM backend renders fixed prompts into a fixed
     shape, and Hugging Face text-classification returns a label."""
     name = type(judge).__name__
-    if isinstance(judge, JevEvaluator) or name == "GroundedAISLMBackend" or (
+    if isinstance(judge, DecisionEvaluator) or name == "GroundedAISLMBackend" or (
         name == "HuggingFaceBackend" and getattr(judge, "task", None) == "text-classification"
     ):
         raise TypeError(
@@ -184,7 +184,12 @@ def _model_name(backend: BaseEvaluator) -> str:
 
 class CascadeEvaluator:
     """
-    Jev first, LLM judge for what it is unsure of.
+    A decision model first, LLM judge for what it is unsure of.
+
+    The first stage (`jev`) is any decision model: Jev ("jev/..."), any /v1/systemone server
+    ("systemone/..."), or OpenAI's Decisions API ("openai-decisions/..."). They share one definition
+    of confidence (see backends.jev.confidence), so `min_confidence` means the same on each; where
+    to set it still depends on the model, so measure it on your own data (grounded_ai.comparison).
 
         cascade = CascadeEvaluator(
             jev="jev/jev-latest",  # or "jev" with jev_kwargs={"use_local_model": True}
@@ -210,8 +215,11 @@ class CascadeEvaluator:
         if not 0.0 <= min_confidence <= 1.0:
             raise ValueError(f"min_confidence must be in [0, 1], got {min_confidence!r}.")
         self.jev = _resolve_backend(jev, jev_kwargs or {})
-        if not isinstance(self.jev, JevEvaluator):
-            raise TypeError(f"The first stage must be a JevEvaluator, got {type(self.jev).__name__}.")
+        if not isinstance(self.jev, DecisionEvaluator):
+            raise TypeError(
+                f"The first stage must be a decision model (jev/, systemone/ or openai-decisions/), "
+                f"got {type(self.jev).__name__}."
+            )
         self.judge = _resolve_backend(judge, judge_kwargs or {})
         _refuse_unusable_judge(self.judge)
         self.min_confidence = min_confidence
