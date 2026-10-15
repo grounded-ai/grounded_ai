@@ -481,3 +481,30 @@ class TestReviewFindings:
     async def test_missing_questions_async(self):
         result = await AsyncEvaluator("jev", api_key="k").evaluate(state="s")
         assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"
+
+
+class TestFailureReasons:
+    """A failed call says why: in the error's message, and when code reads the missing result."""
+
+    def _failed(self, status, body):
+        def handler(request):
+            return httpx.Response(status, json=body)
+
+        backend = JevEvaluator(api_key="k", max_retries=0, client=httpx.Client(transport=httpx.MockTransport(handler)))
+        return backend.evaluate(JevInput(state="x", questions=URGENT))
+
+    def test_structured_api_errors_read_as_text(self):
+        detail = {"error_type": "model_unavailable", "message": "The model is unavailable."}
+        error = self._failed(503, {"detail": detail})
+        assert error.error_code == "503"
+        assert error.message == "model_unavailable: The model is unavailable."
+        assert error.details["error_type"] == "model_unavailable"
+
+    def test_plain_detail_is_kept(self):
+        assert self._failed(401, {"detail": "Invalid API key"}).message == "Invalid API key"
+
+    def test_reading_the_missing_result_names_the_reason(self):
+        error = self._failed(503, {"detail": {"error_type": "model_unavailable", "message": "The model is unavailable."}})
+        with pytest.raises(AttributeError, match="'answers'.*503.*model_unavailable: The model is unavailable"):
+            error.answers
+        assert error.error_code == "503"  # real fields still work

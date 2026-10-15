@@ -66,3 +66,13 @@ class EvaluationError(BaseModel):
     details: Optional[Dict[str, Any]] = Field(
         None, description="Additional context about the error"
     )
+
+    def __getattr__(self, name: str) -> Any:
+        # Code that reads a result field (`.answers`, `.label`, ...) off a failed evaluation gets
+        # the failure's reason in the traceback instead of a bare "no attribute".
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            raise AttributeError(
+                f"{name!r} is not available because the evaluation failed: {self.error_code}: {self.message}"
+            ) from None

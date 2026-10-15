@@ -566,13 +566,18 @@ class ResponseError(Exception):
 
 def _to_error(e: Exception) -> EvaluationError:
     """Every failure leaves the backend as an EvaluationError, like on the other backends."""
-    cause, message = e, str(e)
+    cause, message, details = e, str(e), {}
     if isinstance(e, httpx.HTTPStatusError):
         code = str(e.response.status_code)
         try:
-            message = str(e.response.json().get("detail", e.response.text))
+            detail = e.response.json().get("detail", e.response.text)
         except (ValueError, AttributeError):
-            message = e.response.text
+            detail = e.response.text
+        if isinstance(detail, dict):  # e.g. {"error_type": "model_unavailable", "message": "..."}
+            details["error_type"] = detail.get("error_type")
+            message = ": ".join(str(p) for p in (detail.get("error_type"), detail.get("message")) if p) or str(detail)
+        else:
+            message = str(detail)
     elif isinstance(e, ResponseError):
         code, cause = "INVALID_RESPONSE", e.__cause__ or e
     elif isinstance(e, ModelMismatchError):
@@ -583,4 +588,4 @@ def _to_error(e: Exception) -> EvaluationError:
         code = "INVALID_REQUEST"
     else:
         code = "UNKNOWN_ERROR"
-    return EvaluationError(error_code=code, message=message, details={"exception_type": type(cause).__name__})
+    return EvaluationError(error_code=code, message=message, details={"exception_type": type(cause).__name__, **details})
