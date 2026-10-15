@@ -125,7 +125,7 @@ class TestSystemOne:
         """At 0.5 the d1-reported 0.53 would have been kept; recomputed, it goes to the judge."""
         first = DecisionEvaluator("agent-decision-3b", base_url="http://gpu:8765", **server({"next": D1_ANSWER}))
         judge = FakeJudge({"next": "respond"})
-        result = CascadeEvaluator(jev=first, judge=judge, min_confidence=0.5).evaluate(state="s", questions={"next": CALL})
+        result = CascadeEvaluator(decision_model=first, judge=judge, min_confidence=0.5).evaluate(state="s", questions={"next": CALL})
         assert result.escalated == ["next"] and result.answers["next"].answer == "respond"
 
 
@@ -270,7 +270,7 @@ class TestOpenAIDecisions:
     def test_as_the_cascades_first_stage(self):
         unsure = {"model": "gpt-6-luna", "answers": [{**LUNA["answers"][0], "confidence": 0.3}]}
         judge = FakeJudge({"next": "respond"})
-        result = CascadeEvaluator(jev=OpenAIDecisionsEvaluator(client=FakeDecisions(unsure)), judge=judge,
+        result = CascadeEvaluator(decision_model=OpenAIDecisionsEvaluator(client=FakeDecisions(unsure)), judge=judge,
                                   min_confidence=0.5).evaluate(state="s", questions={"next": CALL})
         assert result.escalated == ["next"] and result.answers["next"].answer == "respond"
 

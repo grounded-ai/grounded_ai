@@ -82,7 +82,7 @@ class FakeJudge(BaseEvaluator):
 
 
 def cascade(answers, judge=None, **kwargs):
-    return CascadeEvaluator(jev=fake_jev(answers), judge=judge or FakeJudge(), **kwargs)
+    return CascadeEvaluator(decision_model=fake_jev(answers), judge=judge or FakeJudge(), **kwargs)
 
 
 def ask(**questions):
@@ -129,8 +129,8 @@ class TestRouting:
     def test_jevs_own_answers_are_kept_for_escalated_questions(self):
         judge = FakeJudge({"area": "billing"})
         result = cascade({"area": UNSURE["area"]}, judge).evaluate(ask(area=AREA))
-        assert isinstance(result.jev, JevOutput)
-        assert result.jev.answers["area"] == ChoiceAnswer(**UNSURE["area"])
+        assert isinstance(result.decision, JevOutput)
+        assert result.decision.answers["area"] == ChoiceAnswer(**UNSURE["area"])
 
     def test_threshold_must_be_a_confidence(self):
         for bad in (-0.1, 1.5):
@@ -215,7 +215,7 @@ class TestReviewFixes:
 
         backend = DecisionEvaluator(use_local_model=True, local_model=MODEL, client=httpx.Client(transport=httpx.MockTransport(handler)))
         judge = FakeJudge({"area": "billing", "urgent": True, "clarity": "clear"})
-        result = CascadeEvaluator(jev=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
+        result = CascadeEvaluator(decision_model=backend, judge=judge).evaluate(ask(area=AREA, urgent=URGENT, clarity=CLARITY))
         assert result.escalated == ["area", "urgent", "clarity"]
 
     def test_judged_lists_what_the_judge_actually_answered(self):
@@ -248,19 +248,19 @@ class TestReviewFixes:
 
     def test_judges_that_cannot_honour_an_output_schema_are_refused(self):
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=fake_jev(CONFIDENT))
+            CascadeEvaluator(decision_model=fake_jev(CONFIDENT), judge=fake_jev(CONFIDENT))
 
         class GroundedAISLMBackend(FakeJudge):  # stands in for the SLM backend without loading torch
             pass
 
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=GroundedAISLMBackend())
+            CascadeEvaluator(decision_model=fake_jev(CONFIDENT), judge=GroundedAISLMBackend())
 
         class HuggingFaceBackend(FakeJudge):
             task = "text-classification"
 
         with pytest.raises(TypeError, match="judge"):
-            CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=HuggingFaceBackend())
+            CascadeEvaluator(decision_model=fake_jev(CONFIDENT), judge=HuggingFaceBackend())
 
     def test_object_instructions_keep_their_key_order_in_the_prompt(self):
         question = NoulQuestion(instructions={"rule": "ports must be 443", "claim": "it listens on 8080"})
@@ -273,7 +273,7 @@ class TestReviewFixes:
 
 class TestFailures:
     def test_jev_failure_is_returned(self):
-        result = CascadeEvaluator(jev=fake_jev(CONFIDENT, status=500), judge=FakeJudge()).evaluate(ask(area=AREA))
+        result = CascadeEvaluator(decision_model=fake_jev(CONFIDENT, status=500), judge=FakeJudge()).evaluate(ask(area=AREA))
         assert isinstance(result, EvaluationError)
         assert result.error_code == "500"
 
@@ -290,18 +290,18 @@ class TestFailures:
 
 class TestConstruction:
     def test_from_model_strings(self):
-        evaluator = CascadeEvaluator(jev="jev", jev_kwargs={"use_local_model": True, "local_model": MODEL}, judge="openai/gpt-4o-mini", judge_kwargs={"api_key": "k"})
-        assert isinstance(evaluator.jev, DecisionEvaluator)
-        assert evaluator.jev.model_name == MODEL
+        evaluator = CascadeEvaluator(decision_model="jev", decision_model_kwargs={"use_local_model": True, "local_model": MODEL}, judge="openai/gpt-4o-mini", judge_kwargs={"api_key": "k"})
+        assert isinstance(evaluator.decision_model, DecisionEvaluator)
+        assert evaluator.decision_model.model_name == MODEL
         assert evaluator.judge.model_name == "gpt-4o-mini"
 
     def test_from_evaluators(self):
-        evaluator = CascadeEvaluator(jev=Evaluator("jev", use_local_model=True, local_model=MODEL), judge=FakeJudge())
-        assert isinstance(evaluator.jev, DecisionEvaluator)
+        evaluator = CascadeEvaluator(decision_model=Evaluator("jev", use_local_model=True, local_model=MODEL), judge=FakeJudge())
+        assert isinstance(evaluator.decision_model, DecisionEvaluator)
 
     def test_first_stage_must_be_jev(self):
         with pytest.raises(TypeError):
-            CascadeEvaluator(jev=FakeJudge(), judge=FakeJudge())
+            CascadeEvaluator(decision_model=FakeJudge(), judge=FakeJudge())
 
     def test_keyword_inputs_like_evaluator(self):
         judge = FakeJudge()
@@ -347,5 +347,32 @@ class TestStructuredCriteriaForTheJudge:
         schema(reasoning_0="r", answer_0=answer["enum"][1])  # a level the judge can actually return
 
     def test_missing_questions_is_an_evaluation_error(self):
-        result = CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=FakeJudge()).evaluate(state="s")
+        result = CascadeEvaluator(decision_model=fake_jev(CONFIDENT), judge=FakeJudge()).evaluate(state="s")
         assert isinstance(result, EvaluationError) and result.error_code == "INVALID_REQUEST"
+
+
+class TestDeprecatedNames:
+    """jev=, jev_kwargs= and result.jev still work and say what replaced them."""
+
+    def test_jev_keyword(self):
+        with pytest.warns(DeprecationWarning, match="decision_model="):
+            evaluator = CascadeEvaluator(jev=fake_jev(CONFIDENT), judge=FakeJudge())
+        with pytest.warns(DeprecationWarning, match=".decision_model"):
+            assert evaluator.jev is evaluator.decision_model
+        result = evaluator.evaluate(ask(area=AREA))
+        with pytest.warns(DeprecationWarning, match=".decision"):
+            assert result.jev is result.decision
+
+    def test_jev_kwargs(self):
+        with pytest.warns(DeprecationWarning):
+            evaluator = CascadeEvaluator(jev="jev", jev_kwargs={"use_local_model": True, "local_model": MODEL},
+                                         judge=FakeJudge())
+        assert evaluator.decision_model.model_name == MODEL
+
+    def test_positional_arguments_still_mean_model_then_judge(self):
+        evaluator = CascadeEvaluator(fake_jev(CONFIDENT), FakeJudge(), 0.7)
+        assert isinstance(evaluator.decision_model, DecisionEvaluator) and evaluator.min_confidence == 0.7
+
+    def test_both_are_required(self):
+        with pytest.raises(TypeError, match="decision_model and a judge"):
+            CascadeEvaluator(decision_model=fake_jev(CONFIDENT))

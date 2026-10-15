@@ -24,7 +24,11 @@ On 200 real agent turns (should the agent have called a tool here, or replied?),
 from grounded_ai import CascadeEvaluator
 from grounded_ai.backends.jev import HALLUCINATION, JevInput
 
-cascade = CascadeEvaluator(jev="jev/jev-latest", judge="anthropic/claude-haiku-4-5", min_confidence=0.9)
+cascade = CascadeEvaluator(
+    decision_model="jev/jev-latest",   # or "openai-decisions/gpt-6-luna", "systemone/agent-decision-9b" + base_url
+    judge="anthropic/claude-haiku-4-5",
+    min_confidence=0.7,
+)
 
 result = cascade.evaluate(JevInput(
     state={"context": "Collins stayed in orbit while Armstrong and Aldrin walked on the Moon.",
@@ -250,12 +254,12 @@ Flags: `--local` (`jev/` models), `--base-url` (`jev/` and `systemone/` models),
 
 ### Cascade details
 
-- **Any decision model first.** `jev=` takes `jev/`, `systemone/` or `openai-decisions/` models.
+- **Any decision model first.** `decision_model=` takes `jev/`, `systemone/` or `openai-decisions/` models (with `decision_model_kwargs=` for `base_url`, `host`, ...). `jev=`, `jev_kwargs=` and `result.jev` still work, with a deprecation warning.
 - **What counts as unsure.** Choice and score answers use their `confidence`. A yes/no answer `p` is read as `|2p - 1|`.
-- **What comes back.** Confident answers exactly as Jev gave them; escalated ones as a `JudgedAnswer` with the judge's pick and `.reasoning`. `result.escalated` and `result.judged` list which questions went where, and `result.jev` keeps all of Jev's answers.
+- **What comes back.** Confident answers exactly as the decision model gave them; escalated ones as a `JudgedAnswer` with the judge's pick and `.reasoning`. `result.escalated` and `result.judged` list which questions went where, and `result.decision` keeps all of the decision model's answers.
 - **Which judges work.** `openai/`, `anthropic/`, `bedrock/`, or `hf/` with `task="text-generation"`.
-- **If something fails.** If Jev fails you get its `EvaluationError`. If the judge fails, you still get Jev's answers and the error in `result.judge_error`.
-- **Threshold.** The default is 0.9. On the tool-call benchmark, 0.7 was the sweet spot; measure on your own data.
+- **If something fails.** If the decision model fails you get its `EvaluationError`. If the judge fails, you still get the decision model's answers and the error in `result.judge_error`.
+- **Threshold.** The default is 0.9. On both benchmarks above, 0.5 to 0.7 was the sweet spot; `compare(..., target_accuracy=)` finds yours.
 
 ### Errors
 

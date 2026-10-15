@@ -29,11 +29,11 @@ JUDGE = os.getenv("CASCADE_JUDGE", "anthropic/claude-haiku-4-5-20251001")
 def cascade():
     judge_kwargs = {"region_name": os.environ["CASCADE_JUDGE_REGION"]} if os.getenv("CASCADE_JUDGE_REGION") else {}
     evaluator = CascadeEvaluator(
-        jev="jev", judge=JUDGE, jev_kwargs={"use_local_model": True, "local_model": CHECKPOINT, "timeout": 300.0}, judge_kwargs=judge_kwargs
+        decision_model="jev", judge=JUDGE, decision_model_kwargs={"use_local_model": True, "local_model": CHECKPOINT, "timeout": 300.0}, judge_kwargs=judge_kwargs
     )
-    evaluator.jev.warmup(port=int(os.getenv("DECIDER_PORT", "8000")), device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
+    evaluator.decision_model.warmup(port=int(os.getenv("DECIDER_PORT", "8000")), device=os.getenv("DECIDER_DEVICE"), timeout=1800.0)
     yield evaluator
-    evaluator.jev.shutdown()
+    evaluator.decision_model.shutdown()
 
 
 def show(result: CascadeOutput) -> None:

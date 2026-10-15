@@ -1,14 +1,15 @@
 """
 CascadeEvaluator: a decision model answers first; an LLM judge answers only what it was unsure of.
 
-Jev answers every question in one cheap request, with measured probabilities. Each answer
-whose confidence is below `min_confidence` is escalated: the original state and just those leftover
-questions go to an LLM judge as a custom evaluation input (JevLeftover), in one call. Confident
-answers are returned as Jev gave them; escalated ones come back as JudgedAnswer, which
+The decision model (Jev, any /v1/systemone server, or OpenAI's Decisions API) answers every question
+in one cheap request, with measured probabilities. Each answer whose confidence is below
+`min_confidence` is escalated: the original state and just those leftover questions go to an LLM
+judge as a custom evaluation input (JevLeftover), in one call. Confident answers are returned as
+the decision model gave them; escalated ones come back as JudgedAnswer, which
 carries the judge's pick and reasoning and no probabilities, because an LLM does not measure any.
 
-Confidence follows TypeSafe's definitions (docs.typesafe.ai/confidence), which Strands Decider
-shares. A choice or score answer has a `confidence` field (normalised max-probability for a choice,
+Confidence follows TypeSafe's definitions (docs.typesafe.ai/confidence), which Strands Decider and
+OpenAI share; other /v1/systemone servers have theirs recomputed to match (backends.jev.confidence). A choice or score answer has a `confidence` field (normalised max-probability for a choice,
 normalised spread for a score). A yes/no (noul) answer has none, because its probability is the
 uncertainty; it is read as |2p - 1|, which is the choice formula at two options.
 
@@ -20,6 +21,7 @@ Measure on your own traffic.
 """
 
 import json
+import warnings
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
 from jinja2 import Template
@@ -43,11 +45,11 @@ _QUESTIONS = TypeAdapter(Dict[str, Question])
 
 
 class JudgedAnswer(BaseModel):
-    """An answer the LLM judge gave for a question Jev was not confident about.
+    """An answer the LLM judge gave for a question the decision model was not confident about.
 
     It has the judge's pick and reasoning, and deliberately no probabilities or confidence. For a
-    score question `answer` is the level as written in the question (Jev's ScoreAnswer gives
-    an index instead); Jev's own answer is in CascadeOutput.jev.
+    score question `answer` is the level as written in the question (a ScoreAnswer gives an index
+    instead); the decision model's own answer is in CascadeOutput.decision.
     """
 
     type: Literal["judged"] = "judged"
@@ -61,15 +63,21 @@ CascadeAnswer = Annotated[Union[NoulAnswer, ChoiceAnswer, ScoreAnswer, JudgedAns
 
 
 class CascadeOutput(BaseModel):
-    """One answer per question: Jev's where it was confident, the judge's where it was not."""
+    """One answer per question: the decision model's where it was confident, the judge's where it was not."""
 
     answers: Dict[str, CascadeAnswer]
     escalated: List[str] = Field(description="Questions sent to the judge, in the order they were asked")
     judged: List[str] = Field(description="Escalated questions the judge answered; empty when it failed")
-    jev: JevOutput = Field(description="Jev's full first-stage answers, escalated ones included")
+    decision: JevOutput = Field(description="The decision model's full answers, escalated ones included")
     judge_error: Optional[EvaluationError] = Field(
-        None, description="Set when the judge failed; escalated questions then keep Jev's answer"
+        None, description="Set when the judge failed; escalated questions then keep the decision model's answer"
     )
+
+    @property
+    def jev(self) -> JevOutput:
+        """Deprecated: `decision`."""
+        warnings.warn("CascadeOutput.jev is deprecated; use .decision.", DeprecationWarning, stacklevel=2)
+        return self.decision
 
 
 _LEFTOVER_TEMPLATE = Template("""Read the state, then answer every question below about it.
@@ -186,39 +194,50 @@ class CascadeEvaluator:
     """
     A decision model first, LLM judge for what it is unsure of.
 
-    The first stage (`jev`) is any decision model: Jev ("jev/..."), any /v1/systemone server
+    The first stage (`decision_model`) is any decision model: Jev ("jev/..."), any /v1/systemone server
     ("systemone/..."), or OpenAI's Decisions API ("openai-decisions/..."). They share one definition
     of confidence (see backends.jev.confidence), so `min_confidence` means the same on each; where
     to set it still depends on the model, so measure it on your own data (grounded_ai.comparison).
 
         cascade = CascadeEvaluator(
-            jev="jev/jev-latest",  # or "jev" with jev_kwargs={"use_local_model": True}
+            decision_model="jev/jev-latest",  # or "systemone/<model>", "openai-decisions/gpt-6-luna"
             judge="anthropic/claude-haiku-4-5-20251001",
-            min_confidence=0.9,
+            min_confidence=0.7,
         )
         result = cascade.evaluate(JevInput(state=..., questions={...}))
-        result.answers["verdict"]   # Jev's answer, or a JudgedAnswer
+        result.answers["verdict"]   # the decision model's answer, or a JudgedAnswer
         result.escalated            # which questions went to the judge
 
-    `jev` and `judge` take a model string, an Evaluator or a backend. `jev_kwargs` and
-    `judge_kwargs` are passed to Evaluator when a model string is given (base_url, api_key, ...).
+    `decision_model` and `judge` take a model string, an Evaluator or a backend.
+    `decision_model_kwargs` and `judge_kwargs` are passed to Evaluator when a model string is
+    given (base_url, api_key, ...). `jev=` and `jev_kwargs=` are deprecated names for the first two.
     """
 
     def __init__(
         self,
-        jev: Any,
-        judge: Any,
+        decision_model: Any = None,
+        judge: Any = None,
         min_confidence: float = 0.9,
-        jev_kwargs: Optional[Dict[str, Any]] = None,
+        decision_model_kwargs: Optional[Dict[str, Any]] = None,
         judge_kwargs: Optional[Dict[str, Any]] = None,
+        *,
+        jev: Any = None,
+        jev_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        if jev is not None or jev_kwargs is not None:
+            warnings.warn("CascadeEvaluator(jev=, jev_kwargs=) is deprecated; use decision_model= and "
+                          "decision_model_kwargs=.", DeprecationWarning, stacklevel=2)
+            decision_model = decision_model if decision_model is not None else jev
+            decision_model_kwargs = decision_model_kwargs or jev_kwargs
+        if decision_model is None or judge is None:
+            raise TypeError("CascadeEvaluator needs a decision_model and a judge.")
         if not 0.0 <= min_confidence <= 1.0:
             raise ValueError(f"min_confidence must be in [0, 1], got {min_confidence!r}.")
-        self.jev = _resolve_backend(jev, jev_kwargs or {})
-        if not isinstance(self.jev, DecisionEvaluator):
+        self.decision_model = _resolve_backend(decision_model, decision_model_kwargs or {})
+        if not isinstance(self.decision_model, DecisionEvaluator):
             raise TypeError(
                 f"The first stage must be a decision model (jev/, systemone/ or openai-decisions/), "
-                f"got {type(self.jev).__name__}."
+                f"got {type(self.decision_model).__name__}."
             )
         self.judge = _resolve_backend(judge, judge_kwargs or {})
         _refuse_unusable_judge(self.judge)
@@ -226,12 +245,18 @@ class CascadeEvaluator:
 
     # Shared by evaluate() and evaluate_async(): everything except the two backend calls.
 
+    @property
+    def jev(self) -> DecisionEvaluator:
+        """Deprecated: `decision_model`."""
+        warnings.warn("CascadeEvaluator.jev is deprecated; use .decision_model.", DeprecationWarning, stacklevel=2)
+        return self.decision_model
+
     def _jev_input(self, input_data: Any, kwargs: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
         from . import _prepare_input
 
-        input_data, backend_kwargs = _prepare_input(self.jev, input_data, kwargs)
+        input_data, backend_kwargs = _prepare_input(self.decision_model, input_data, kwargs)
         if isinstance(input_data, dict):
-            input_data = self.jev.input_schema(**input_data)
+            input_data = self.decision_model.input_schema(**input_data)
         return input_data, backend_kwargs
 
     def _leftover(self, input_data: JevInput, jev_output: JevOutput) -> Optional[JevLeftover]:
@@ -249,10 +274,10 @@ class CascadeEvaluator:
         answers: Dict[str, Any] = dict(jev_output.answers)
         escalated = list(leftover.questions) if leftover else []
         if leftover is None:
-            return CascadeOutput(answers=answers, escalated=[], judged=[], jev=jev_output)
+            return CascadeOutput(answers=answers, escalated=[], judged=[], decision=jev_output)
         if isinstance(judged, EvaluationError):
             return CascadeOutput(
-                answers=answers, escalated=escalated, judged=[], jev=jev_output, judge_error=judged
+                answers=answers, escalated=escalated, judged=[], decision=jev_output, judge_error=judged
             )
         try:
             judge = _model_name(self.judge)
@@ -266,9 +291,9 @@ class CascadeEvaluator:
         except Exception as e:  # the judge returned something other than the schema it was given
             return CascadeOutput(
                 answers=dict(jev_output.answers), escalated=escalated, judged=[],
-                jev=jev_output, judge_error=_judge_error(e),
+                decision=jev_output, judge_error=_judge_error(e),
             )
-        return CascadeOutput(answers=answers, escalated=escalated, judged=escalated, jev=jev_output)
+        return CascadeOutput(answers=answers, escalated=escalated, judged=escalated, decision=jev_output)
 
     def evaluate(self, input_data: Any = None, **kwargs) -> Union[CascadeOutput, EvaluationError]:
         """Takes the same inputs as Evaluator("jev/...").evaluate(): a JevInput (or subclass),
@@ -277,7 +302,7 @@ class CascadeEvaluator:
             input_data, backend_kwargs = self._jev_input(input_data, kwargs)
         except ValidationError as e:
             return _input_error(e)
-        jev_output = self.jev.evaluate(input_data, **backend_kwargs)
+        jev_output = self.decision_model.evaluate(input_data, **backend_kwargs)
         if isinstance(jev_output, EvaluationError):
             return jev_output
         leftover = self._leftover(input_data, jev_output)
@@ -294,7 +319,7 @@ class CascadeEvaluator:
             input_data, backend_kwargs = self._jev_input(input_data, kwargs)
         except ValidationError as e:
             return _input_error(e)
-        jev_output = await self.jev.evaluate_async(input_data, **backend_kwargs)
+        jev_output = await self.decision_model.evaluate_async(input_data, **backend_kwargs)
         if isinstance(jev_output, EvaluationError):
             return jev_output
         leftover = self._leftover(input_data, jev_output)

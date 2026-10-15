@@ -5,7 +5,7 @@ Sonnet 4.6 deciding everything, on one agent decision: should the next turn call
 Both setups see the same items and are timed and priced per call:
 
   1. Sonnet alone:  Evaluator("bedrock/...sonnet-4-6").evaluate(...)
-  2. Cascade:       CascadeEvaluator(jev="jev/jev-latest", judge=<the same Sonnet Evaluator>,
+  2. Cascade:       CascadeEvaluator(decision_model="jev/jev-latest", judge=<the same Sonnet Evaluator>,
                                      min_confidence=t).evaluate(...), once per threshold t
 
 Data: GeneralFunctionCall-Test (evalscope on ModelScope, Apache-2.0). Label = whether Kimi
@@ -120,7 +120,7 @@ def cascade_once(cascade, bill, state, label) -> dict:
     seconds = time.perf_counter() - t
     answer = result.answers["next"]
     answer = answer.answer if result.judged else answer.choice  # Sonnet's pick, or Jev's
-    cost = result.jev.usage["input_tokens"] * JEV_PRICE + bill.take()
+    cost = result.decision.usage["input_tokens"] * JEV_PRICE + bill.take()
     return {"answer": answer, "right": answer == label, "seconds": seconds, "cost": cost,
             "sent_to_sonnet": bool(result.escalated)}
 
@@ -147,7 +147,7 @@ def main(n: int, thresholds: list, workers: int, seed: int):
     results = {"n": n, "sonnet": SONNET, "jev": JEV,
                "sonnet_alone": run(lambda s, y: sonnet_alone(sonnet, bill, s, y), items, workers)}
     for t in thresholds:
-        cascade = CascadeEvaluator(jev=JEV, judge=sonnet, min_confidence=t)
+        cascade = CascadeEvaluator(decision_model=JEV, judge=sonnet, min_confidence=t)
         results[f"cascade_{t}"] = run(lambda s, y: cascade_once(cascade, bill, s, y), items, workers)
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(results, indent=2))

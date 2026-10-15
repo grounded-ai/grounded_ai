@@ -1,5 +1,5 @@
 """
-JevEvaluator against TypeSafe's hosted Jev.
+DecisionEvaluator (host="typesafe") against TypeSafe's hosted Jev.
 
 Skipped unless TYPESAFE_API_KEY is set. Each run costs a few thousand input tokens:
 
