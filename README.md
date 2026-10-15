@@ -136,17 +136,27 @@ print(report.table())
 
 An item is `{"state": ..., "questions": {...}, "labels": {"next": "call_tool"}}` (the option for a choice, `true`/`false` for a yes/no, the level index for a score). The judge is asked once per item, and only about items some model would send it. From the command line: `grounded-ai compare items.jsonl --model ... --model ... --judge ...`; `--save-records` and `--records` merge models that run on different machines.
 
-On the cascade benchmark above (200 agent turns, Sonnet 4.6 as the judge, its answers reused), [`compare_backends.py`](benchmarks/tool_call/compare_backends.py):
+On agent-decision's own test set ([`agent-decision-eval`](https://huggingface.co/datasets/grounded-ai/agent-decision-eval), 30 rows from each of its five question families: tool calls, agent steps from AgentDojo and τ-bench, call/ask/decline, call or not, grounding; 165 questions), with Sonnet 4.6 as the judge ([script, records and judge answers](benchmarks/agent_decision_eval)):
 
-| First stage | Alone | Cascade at 0.5: to Sonnet / accuracy / $ per 1M | Cascade at 0.7 |
+| Decision model | Alone | Right when it acts alone at 0.7 | Cascade at 0.7: items to Sonnet / accuracy / $ per 1M |
 |---|---|---|---|
-| Sonnet 4.6 alone | 0.670 | 100% / 0.670 / $7,786 | |
-| `jev/jev-latest` | **0.715** | 27% / **0.685** / $2,208 | 36% / **0.690** / $2,936 |
-| `openai-decisions/gpt-6-luna` | 0.685 | **17%** / 0.680 / **$1,260** | 26% / 0.655 / $1,970 |
-| `systemone/agent-decision-3b` | 0.620 | 60% / 0.650 / $4,797 | 76% / 0.665 / $6,372 |
-| `systemone/agent-decision-9b` | 0.575 | 58% / 0.675 / $4,864 | 80% / 0.675 / $6,470 |
+| Sonnet 4.6 alone | 0.897 | | 100% / 0.897 / $6,087 |
+| `systemone/agent-decision-9b` | **0.945** | 0.96 | 15% / **0.927** / $1,056 |
+| `systemone/agent-decision-3b` | 0.897 | **0.97** | 20% / 0.909 / $1,312 |
+| `jev/jev-latest` | 0.891 | 0.96 | 26% / 0.897 / $1,829 |
+| `openai-decisions/gpt-6-luna` | 0.836 | 0.87 | **10%** / 0.861 / **$607** |
 
-Jev is the most accurate first stage here, OpenAI the cheapest. Our agent-decision models, trained for vetting agent steps and tool calls rather than predicting whether another model would call a tool, are rarely confident on this data and send most of it to the judge. Which is best depends on the data: measure on yours. (agent-decision runs on your own hardware, so its cost is only the judge calls: the 3B runs on a CPU, the 9B needs a CUDA GPU.)
+agent-decision was trained on data like this (a held-out split of the same sources), so the table favours it, as the tool-call benchmark favours models that read general chat: there, the same four models rank differently.
+
+| Tool-call benchmark (200 turns, [`compare_backends.py`](benchmarks/tool_call/compare_backends.py)) | Alone | Cascade at 0.5: to Sonnet / accuracy / $ per 1M |
+|---|---|---|
+| Sonnet 4.6 alone | 0.670 | 100% / 0.670 / $7,786 |
+| `jev/jev-latest` | **0.715** | 27% / **0.685** / $2,208 |
+| `openai-decisions/gpt-6-luna` | 0.685 | **17%** / 0.680 / **$1,260** |
+| `systemone/agent-decision-3b` | 0.620 | 60% / 0.650 / $4,797 |
+| `systemone/agent-decision-9b` | 0.575 | 58% / 0.675 / $4,864 |
+
+Which model is best depends on the data: measure on yours. agent-decision runs on your own hardware, so its cost is only the judge calls (the 3B runs on a CPU, the 9B needs a CUDA GPU); Jev and OpenAI are priced per input token.
 
 ### A local fine-tuned judge (GPU)
 

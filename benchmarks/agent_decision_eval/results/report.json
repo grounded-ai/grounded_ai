@@ -1,0 +1,115 @@
+{
+  "models": {
+    "jev/jev-latest": {
+      "model": "jev/jev-latest",
+      "questions": 165,
+      "failed": 0,
+      "accuracy": 0.8909090909090909,
+      "ece": 0.04490909090909091,
+      "seconds_mean": 0.17846012667093117,
+      "seconds_median": 0.1681196664867457,
+      "input_tokens_mean": 1281.5636363636363,
+      "thresholds": [
+        {
+          "threshold": 0.5,
+          "settled": 0.8606060606060606,
+          "settled_accuracy": 0.9577464788732394,
+          "cascade_accuracy": 0.9030303030303031,
+          "judge_share": 0.1393939393939394
+        },
+        {
+          "threshold": 0.7,
+          "settled": 0.7636363636363637,
+          "settled_accuracy": 0.9603174603174603,
+          "cascade_accuracy": 0.896969696969697,
+          "judge_share": 0.23636363636363636
+        }
+      ],
+      "recommended_threshold": null
+    },
+    "openai-decisions/gpt-6-luna": {
+      "model": "openai-decisions/gpt-6-luna",
+      "questions": 165,
+      "failed": 0,
+      "accuracy": 0.8363636363636363,
+      "ece": 0.12418181818181818,
+      "seconds_mean": 0.24596967640449294,
+      "seconds_median": 0.17739156301831827,
+      "input_tokens_mean": 1089.8545454545454,
+      "thresholds": [
+        {
+          "threshold": 0.5,
+          "settled": 0.9454545454545454,
+          "settled_accuracy": 0.8589743589743589,
+          "cascade_accuracy": 0.8545454545454545,
+          "judge_share": 0.05454545454545454
+        },
+        {
+          "threshold": 0.7,
+          "settled": 0.9090909090909091,
+          "settled_accuracy": 0.8666666666666667,
+          "cascade_accuracy": 0.8606060606060606,
+          "judge_share": 0.09090909090909091
+        }
+      ],
+      "recommended_threshold": null
+    },
+    "systemone/agent-decision-3b": {
+      "model": "systemone/agent-decision-3b",
+      "questions": 165,
+      "failed": 0,
+      "accuracy": 0.896969696969697,
+      "ece": 0.034631254809106796,
+      "seconds_mean": 0.05342466272666854,
+      "seconds_median": 0.03610790550000331,
+      "input_tokens_mean": 979.8727272727273,
+      "thresholds": [
+        {
+          "threshold": 0.5,
+          "settled": 0.8727272727272727,
+          "settled_accuracy": 0.9583333333333334,
+          "cascade_accuracy": 0.9151515151515152,
+          "judge_share": 0.12727272727272726
+        },
+        {
+          "threshold": 0.7,
+          "settled": 0.8181818181818182,
+          "settled_accuracy": 0.9703703703703703,
+          "cascade_accuracy": 0.9090909090909091,
+          "judge_share": 0.18181818181818182
+        }
+      ],
+      "recommended_threshold": null
+    },
+    "systemone/agent-decision-9b": {
+      "model": "systemone/agent-decision-9b",
+      "questions": 165,
+      "failed": 0,
+      "accuracy": 0.9454545454545454,
+      "ece": 0.0340187878787879,
+      "seconds_mean": 0.26560817039999773,
+      "seconds_median": 0.09080517950002331,
+      "input_tokens_mean": 983.0787878787879,
+      "thresholds": [
+        {
+          "threshold": 0.5,
+          "settled": 0.9393939393939394,
+          "settled_accuracy": 0.9612903225806452,
+          "cascade_accuracy": 0.9454545454545454,
+          "judge_share": 0.06060606060606061
+        },
+        {
+          "threshold": 0.7,
+          "settled": 0.8606060606060606,
+          "settled_accuracy": 0.9647887323943662,
+          "cascade_accuracy": 0.9272727272727272,
+          "judge_share": 0.1393939393939394
+        }
+      ],
+      "recommended_threshold": null
+    }
+  },
+  "judge": "given answers",
+  "judge_accuracy": 0.896969696969697,
+  "target_accuracy": null
+}
