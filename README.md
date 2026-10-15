@@ -8,7 +8,7 @@ One Python interface for evaluating what LLM apps and agents say and do. Use a f
 
 ## Cut your LLM-judge bill with a cascade
 
-`CascadeEvaluator` asks [Jev](https://docs.typesafe.ai), a fast decision model, first. Jev reports how confident it is in each answer. Confident answers are kept; only the rest go to the LLM judge of your choice.
+`CascadeEvaluator` asks a fast decision model first: [Jev](https://docs.typesafe.ai), OpenAI's Decisions API, or any model served at `/v1/systemone`. The decision model reports how confident it is in each answer. Confident answers are kept; only the rest go to the LLM judge of your choice.
 
 On 200 real agent turns (should the agent have called a tool here, or replied?), against Claude Sonnet 4.6 judging everything:
 
@@ -39,7 +39,7 @@ print(answer.answer if result.judged else answer.choice)   # 'hallucination'
 
 ```bash
 pip install grounded-ai                # LLM judges: OpenAI, Anthropic, Bedrock
-pip install "grounded-ai[jev]"         # + Jev (hosted) and CascadeEvaluator
+pip install "grounded-ai[jev]"         # + decision models (Jev, any /v1/systemone server, OpenAI Decisions) and CascadeEvaluator
 pip install "grounded-ai[jev-local]"   # + Strands Decider, Jev's open-weights counterpart, on your machine
 pip install "grounded-ai[slm]"         # + the grounded-ai fine-tuned judges (GPU)
 ```
@@ -57,6 +57,8 @@ Python 3.10+.
 | `grounded-ai/<model>` | Our fine-tuned Phi-4 judges, on your GPU | none |
 | `jev/jev-latest` | TypeSafe's Jev decision model | `TYPESAFE_API_KEY` |
 | `jev` + `use_local_model=True` | Strands Decider on your machine | none |
+| `systemone/<model>` + `base_url=` or `host=` | Any decision model behind `/v1/systemone`: llama.cpp, Ollama, vLLM, SGLang, a vendor's API, [agent-decision](https://github.com/grounded-ai/agent-decision) | the server's, if any |
+| `openai-decisions/<model>` | OpenAI's Decisions API (`gpt-6-luna`) | `OPENAI_API_KEY` |
 
 ## Examples
 
@@ -107,6 +109,44 @@ answers = jev.evaluate(JevInput(
 )).answers
 print(answers["urgent"].noul, answers["team"].choice)   # 0.91 'billing'
 ```
+
+### Any decision model
+
+Decision models share one request format, `POST /v1/systemone` (a state and typed questions in, a probability for every answer out). `DecisionEvaluator` speaks it to any server; OpenAI's Decisions API is translated to it. The same `JevInput` works with every one of them.
+
+```python
+Evaluator("systemone/laya", host="llamacpp")                     # llama-server on :8080
+Evaluator("systemone/kev-4b", host="ollama")                     # Ollama on :11434
+Evaluator("systemone/agent-decision-9b", base_url="http://gpu-box:8765")
+Evaluator("openai-decisions/gpt-6-luna")
+```
+
+### Choose a decision model on your own data
+
+There are dozens of decision models, and which one is right, and at what threshold, depends on your data. `compare` runs each one on your labelled items and reports accuracy, calibration, speed, and at each threshold how much it settles alone, how often those answers are right, and what a cascade with your judge gets.
+
+```python
+from grounded_ai import compare
+
+report = compare(items, ["jev/jev-latest", "openai-decisions/gpt-6-luna",
+                         "systemone/agent-decision-9b@http://gpu-box:8765"],
+                 judge="anthropic/claude-sonnet-4-6", thresholds=(0.5, 0.7, 0.9), target_accuracy=0.9)
+print(report.table())
+```
+
+An item is `{"state": ..., "questions": {...}, "labels": {"next": "call_tool"}}` (the option for a choice, `true`/`false` for a yes/no, the level index for a score). The judge is asked once per item, and only about items some model would send it. From the command line: `grounded-ai compare items.jsonl --model ... --model ... --judge ...`; `--save-records` and `--records` merge models that run on different machines.
+
+On the cascade benchmark above (200 agent turns, Sonnet 4.6 as the judge, its answers reused), [`compare_backends.py`](benchmarks/tool_call/compare_backends.py):
+
+| First stage | Alone | Cascade at 0.5: to Sonnet / accuracy / $ per 1M | Cascade at 0.7 |
+|---|---|---|---|
+| Sonnet 4.6 alone | 0.670 | 100% / 0.670 / $7,786 | |
+| `jev/jev-latest` | **0.715** | 27% / **0.685** / $2,208 | 36% / **0.690** / $2,936 |
+| `openai-decisions/gpt-6-luna` | 0.685 | **17%** / 0.680 / **$1,260** | 26% / 0.655 / $1,970 |
+| `systemone/agent-decision-3b` | 0.620 | 60% / 0.650 / $4,818 | 76% / 0.665 / $6,394 |
+| `systemone/agent-decision-9b` | 0.575 | 58% / 0.675 / $4,971 | 80% / 0.675 / $6,577 |
+
+Jev is the most accurate first stage here, OpenAI the cheapest. Our agent-decision models, trained for vetting agent steps and tool calls rather than predicting whether another model would call a tool, are rarely confident on this data and send most of it to the judge. Which is best depends on the data: measure on yours. (agent-decision prices count A100 time at $1.20/h.)
 
 ### A local fine-tuned judge (GPU)
 
@@ -173,13 +213,17 @@ command = "grounded-ai hook --model jev/jev-latest"
 timeout = 60
 ```
 
-Flags: `--local` and `--base-url` (`jev/` models), `--region` (`bedrock/` models), `--max-context-chars` (hook only, default 20000).
+Flags: `--local` (`jev/` models), `--base-url` (`jev/` and `systemone/` models), `--region` (`bedrock/` models), `--max-context-chars` (hook only, default 20000).
 
 ## Reference
 
-### Jev details
+### Decision model details
 
-- **Hosted or local.** `Evaluator("jev/jev-latest")` calls TypeSafe's API. Add `use_local_model=True` to run [Strands Decider](https://github.com/strands-labs/strands-decider) instead; `evaluator.backend.warmup(port=8000)` downloads the model and starts the server, and `local_model=` picks a checkpoint. The local server takes question criteria as plain text only.
+- **One backend.** `DecisionEvaluator` serves every `/v1/systemone` model; `host=` picks a preset (`typesafe`, `strands`, `llamacpp`, `ollama`) and `base_url=` points anywhere else. `JevEvaluator` is deprecated: it still works, with a warning, and takes the same arguments.
+- **Hosted or local Jev.** `Evaluator("jev/jev-latest")` calls TypeSafe's API. Add `use_local_model=True` (or `host="strands"`) to run [Strands Decider](https://github.com/strands-labs/strands-decider) instead; `evaluator.backend.warmup(port=8000)` downloads the model and starts the server, and `local_model=` picks a checkpoint. The local server takes question criteria as plain text only.
+- **One meaning of confidence.** Models disagree on what `confidence` means: Jev, Strands Decider and OpenAI use [TypeSafe's definitions](https://docs.typesafe.ai/confidence), while d1 and Clef served locally report the top probability (0.53 for a 53/47 answer). Answers from other `systemone/` servers have their confidence recomputed from the probabilities with TypeSafe's definitions (`grounded_ai.confidence`), so a threshold means the same on every model.
+- **What each model accepts.** `capabilities=` (question types, option and level limits, text-only criteria) refuses a request a model can't take, as `INVALID_REQUEST`, before it is sent. Some models answer only choice questions, or only yes/no.
+- **OpenAI's Decisions API.** Questions are translated (`noul` ↔ `predicate`, criteria ↔ `choices`/`levels`); a yes/no question's true/false descriptions are added to its instructions, and a question OpenAI declines to answer fails the call as `REFUSED`.
 - **Question types.**
 
   | Question | You give | You get |
@@ -196,6 +240,7 @@ Flags: `--local` and `--base-url` (`jev/` models), `--region` (`bedrock/` models
 
 ### Cascade details
 
+- **Any decision model first.** `jev=` takes `jev/`, `systemone/` or `openai-decisions/` models.
 - **What counts as unsure.** Choice and score answers use their `confidence`. A yes/no answer `p` is read as `|2p - 1|`.
 - **What comes back.** Confident answers exactly as Jev gave them; escalated ones as a `JudgedAnswer` with the judge's pick and `.reasoning`. `result.escalated` and `result.judged` list which questions went where, and `result.jev` keeps all of Jev's answers.
 - **Which judges work.** `openai/`, `anthropic/`, `bedrock/`, or `hf/` with `task="text-generation"`.
