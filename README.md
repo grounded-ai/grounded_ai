@@ -227,6 +227,8 @@ command = "grounded-ai hook --model jev/jev-latest"
 timeout = 60
 ```
 
+Any decision model or LLM judge works as `--model`: `--model openai-decisions/gpt-6-luna`, or a self-hosted `--model systemone/agent-decision-9b --base-url http://127.0.0.1:8765`.
+
 Flags: `--local` (`jev/` models), `--base-url` (`jev/` and `systemone/` models), `--region` (`bedrock/` models), `--max-context-chars` (hook only, default 20000).
 
 ## Reference

@@ -502,6 +502,8 @@ class TestMakeChecker:
             ("anthropic/claude-haiku-4-5", {"local": True}, "--local"),
             ("anthropic/claude-haiku-4-5", {"base_url": "http://x"}, "--base-url"),
             ("bedrock/m", {"base_url": "http://x"}, "--base-url"),
+            ("openai-decisions/gpt-6-luna", {"base_url": "http://x"}, "--base-url"),
+            ("systemone/agent-decision-9b", {"local": True}, "--local"),
         ],
     )
     def test_flags_for_another_backend_are_refused(
@@ -525,6 +527,45 @@ class TestMakeChecker:
         cli.make_checker("jev/jev-latest", base_url="http://localhost:9000", local=True)
         assert seen["bedrock/m"]["region_name"] == "eu-west-1"
         assert seen["jev/jev-latest"] == {"base_url": "http://localhost:9000", "use_local_model": True}
+
+    def test_systemone_takes_its_server_from_base_url(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(cli, "_evaluator", lambda model, **kwargs: seen.setdefault(model, kwargs))
+        cli.make_checker("systemone/agent-decision-9b", base_url="http://gpu:8765")
+        cli.make_checker("openai-decisions/gpt-6-luna")
+        assert seen == {"systemone/agent-decision-9b": {"base_url": "http://gpu:8765"}, "openai-decisions/gpt-6-luna": {}}
+
+    def test_systemone_without_a_server_is_a_usage_error(self):
+        code, out, err = run(["check", "--model", "systemone/agent-decision-9b", "--response", BAD, "--context", CONTEXT])
+        assert (code, out) == (2, "") and "base_url" in err
+
+    def test_the_hook_with_a_systemone_server(self, monkeypatch, tmp_path):
+        """The whole hook against a /v1/systemone server: the hallucination question goes out, a block comes back."""
+        import httpx
+
+        from grounded_ai.backends.jev import DecisionEvaluator
+
+        asked = []
+
+        def server(request):
+            body = json.loads(request.content)
+            asked.append(body)
+            answer = {"type": "choice", "choice": "hallucination", "confidence": 0.8,
+                      "probabilities": {"hallucination": 0.9, "faithful": 0.1}}
+            return httpx.Response(200, json={"answers": {"verdict": answer}})
+
+        def evaluator(model, **kwargs):
+            assert model == "systemone/agent-decision-9b" and kwargs == {"base_url": "http://gpu:8765"}
+            return DecisionEvaluator("agent-decision-9b", client=httpx.Client(transport=httpx.MockTransport(server)), **kwargs)
+
+        monkeypatch.setattr(cli, "_evaluator", evaluator)
+        path = claude_transcript(tmp_path, "How long do refunds take?", [CONTEXT], BAD)
+        code, out, _ = run(["hook", "--model", "systemone/agent-decision-9b", "--base-url", "http://gpu:8765"],
+                           stdin=hook_input(path, BAD))
+        assert code == 0 and json.loads(out)["decision"] == "block"
+        assert "0.90" in json.loads(out)["reason"]
+        assert asked[0]["model"] == "agent-decision-9b" and set(asked[0]["questions"]) == {"verdict"}
+        assert asked[0]["state"] == {"context": CONTEXT, "query": "How long do refunds take?", "response": BAD}
 
     def test_a_model_that_ignores_the_verdict_schema_raises(self, monkeypatch):
         from grounded_ai.schemas import EvaluationOutput
