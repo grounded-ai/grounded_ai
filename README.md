@@ -143,10 +143,10 @@ On the cascade benchmark above (200 agent turns, Sonnet 4.6 as the judge, its an
 | Sonnet 4.6 alone | 0.670 | 100% / 0.670 / $7,786 | |
 | `jev/jev-latest` | **0.715** | 27% / **0.685** / $2,208 | 36% / **0.690** / $2,936 |
 | `openai-decisions/gpt-6-luna` | 0.685 | **17%** / 0.680 / **$1,260** | 26% / 0.655 / $1,970 |
-| `systemone/agent-decision-3b` | 0.620 | 60% / 0.650 / $4,818 | 76% / 0.665 / $6,394 |
-| `systemone/agent-decision-9b` | 0.575 | 58% / 0.675 / $4,971 | 80% / 0.675 / $6,577 |
+| `systemone/agent-decision-3b` | 0.620 | 60% / 0.650 / $4,797 | 76% / 0.665 / $6,372 |
+| `systemone/agent-decision-9b` | 0.575 | 58% / 0.675 / $4,864 | 80% / 0.675 / $6,470 |
 
-Jev is the most accurate first stage here, OpenAI the cheapest. Our agent-decision models, trained for vetting agent steps and tool calls rather than predicting whether another model would call a tool, are rarely confident on this data and send most of it to the judge. Which is best depends on the data: measure on yours. (agent-decision prices count A100 time at $1.20/h.)
+Jev is the most accurate first stage here, OpenAI the cheapest. Our agent-decision models, trained for vetting agent steps and tool calls rather than predicting whether another model would call a tool, are rarely confident on this data and send most of it to the judge. Which is best depends on the data: measure on yours. (agent-decision runs on your own hardware, so its cost is only the judge calls: the 3B runs on a CPU, the 9B needs a CUDA GPU.)
 
 ### A local fine-tuned judge (GPU)
 
