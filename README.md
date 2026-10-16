@@ -20,6 +20,8 @@ On 200 real agent turns (should the agent have called a tool here, or replied?),
 
 51% faster and 61% cheaper at 0.7, with no accuracy lost. [Write-up](https://groundedai.tech/blog/cascade-evaluator-tool-calls/) · [benchmark script](benchmarks/tool_call/bench.py)
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/grounded-ai/grounded_ai/blob/main/examples/cascade.ipynb) Try it: [`examples/cascade.ipynb`](examples/cascade.ipynb) runs a cascade with Jev, OpenAI Decisions and agent-decision-3b (served in the notebook), then picks a model and threshold with `compare()`.
+
 ```python
 from grounded_ai import CascadeEvaluator
 from grounded_ai.backends.jev import HALLUCINATION, JevInput
