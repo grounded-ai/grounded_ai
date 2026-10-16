@@ -5,6 +5,7 @@ model accepts.
 """
 
 import json
+import re
 from types import SimpleNamespace
 
 import httpx
@@ -199,6 +200,21 @@ class TestOpenAIDecisions:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         backend = Evaluator("openai-decisions/gpt-6-luna").backend
         assert isinstance(backend, OpenAIDecisionsEvaluator) and backend.model_name == "gpt-6-luna"
+
+    @pytest.mark.parametrize("old", ["2.16.0", "3.25.1"])
+    def test_an_sdk_without_decisions_is_named(self, monkeypatch, old):
+        """Colab and older installs have an openai SDK with no `client.decisions`; fail up front, saying which."""
+        import openai
+
+        monkeypatch.setattr(openai, "__version__", old, raising=False)
+        with pytest.raises(ImportError, match=rf"openai>=3\.26 \(installed: {re.escape(old)}\)"):
+            OpenAIDecisionsEvaluator(client=FakeDecisions(LUNA))
+
+    def test_an_sdk_with_decisions_passes(self, monkeypatch):
+        import openai
+
+        monkeypatch.setattr(openai, "__version__", "3.26.0", raising=False)
+        OpenAIDecisionsEvaluator(client=FakeDecisions(LUNA))
 
     def test_request_is_translated(self):
         client = FakeDecisions(LUNA)

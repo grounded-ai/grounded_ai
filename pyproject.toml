@@ -51,14 +51,16 @@ slm = [
   "flash-attn",
   "bitsandbytes",
 ]
-# Jev: the HTTP client for TypeSafe's hosted API.
+# Decision models: the HTTP client for Jev and /v1/systemone servers, and an openai SDK with the Decisions API.
 jev = [
   "httpx>=0.23.0",
+  "openai>=3.26",
 ]
 # Jev's local mode: the HTTP client, plus the Strands Decider server (`strands-decider serve`)
 # and its torch stack.
 jev-local = [
   "httpx>=0.23.0",
+  "openai>=3.26",
   "strands-decider",
 ]
 
