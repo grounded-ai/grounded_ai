@@ -99,6 +99,21 @@ def from_decisions_response(response: Dict[str, Any], body: Dict[str, Any]) -> J
     )
 
 
+MIN_OPENAI = (3, 26)  # the first openai SDK with `client.decisions`
+
+
+def _require_decisions_sdk(openai: Any) -> None:
+    """Older SDKs have no `decisions`; say so up front instead of failing on the first call."""
+    version = getattr(openai, "__version__", None)
+    if not isinstance(version, str):
+        return
+    parts = tuple(int(p) for p in version.split(".")[:2] if p.isdigit())
+    if parts < MIN_OPENAI:
+        need = ".".join(map(str, MIN_OPENAI))
+        raise ImportError(f"OpenAI Decisions needs openai>={need} (installed: {version}). "
+                          f'Run: pip install -U "openai>={need}"')
+
+
 class OpenAIDecisionsEvaluator(DecisionEvaluator):
     """
     OpenAI's Decisions API with DecisionEvaluator's input and output, so it can stand in for Jev
@@ -114,6 +129,7 @@ class OpenAIDecisionsEvaluator(DecisionEvaluator):
                  async_client: Optional[Any] = None, **kwargs):
         import openai
 
+        _require_decisions_sdk(openai)
         self._openai_args = dict(api_key=api_key, base_url=base_url, timeout=timeout, max_retries=max_retries)
         client = client or openai.OpenAI(**self._openai_args)
         # The openai client holds the key and the address; base_url here is only what errors report.
